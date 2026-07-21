@@ -18,6 +18,8 @@ Enter2Send is a small Android accessibility utility for people who use the offic
 | **Enter** in the focused ChatGPT composer | Sends the current message exactly once |
 | **Numpad Enter** in the focused composer | Sends through the explicit Android numpad key path |
 | **Shift+Enter** | Passes through to ChatGPT and inserts a newline |
+| **F8** with the experimental toggle enabled | Starts dictation, or stops it and returns the transcript for review |
+| **Enter while dictating** | Stops dictation and submits through ChatGPT's existing Send action |
 | Empty or ambiguous composer | Leaves Enter to ChatGPT's normal behavior |
 | Search, settings, login fields, or another app | Completely unaffected |
 | Enter2Send switch disabled | All keyboard input passes through unchanged |
@@ -29,6 +31,9 @@ The service acts only when Android exposes all of the following unambiguously:
 3. There is one nearby visible, enabled Send action.
 
 If any requirement is missing or ambiguous, Enter2Send does nothing and the key continues normally.
+
+> [!NOTE]
+> The signed v0.1.0 release contains only the verified Enter behavior. F8 support currently exists only on the isolated `experiment/remote-dictation` branch and is off by default. Its debug APK uses the separate package `com.ctech.enter2send.dictation`, allowing it to be installed beside v0.1.0; enable only one Enter2Send accessibility service at a time.
 
 ## Why this exists
 
@@ -111,7 +116,7 @@ Enter2Send intentionally has a small trust boundary:
 - No generalized key-remapping interface
 - No custom keyboard or input method
 
-The accessibility service is package-restricted to the official ChatGPT Android app. Only Enter and Numpad Enter can be consumed; all other key events return immediately.
+The accessibility service is package-restricted to the official ChatGPT Android app. The stable release consumes only handled Enter and Numpad Enter events. The experimental branch may also consume F8 when its separate opt-in switch is enabled and a unique ChatGPT dictation action is present.
 
 ## Troubleshooting
 
@@ -132,9 +137,19 @@ The accessibility service is package-restricted to the official ChatGPT Android 
 - [x] Shift+Enter inserts a newline
 - [x] Samsung DeX verification on the target Galaxy device
 - [ ] Physical Numpad Enter verification
-- [ ] **Optional dictation hotkey support** for starting and stopping ChatGPT dictation from a physical keyboard
+- [ ] **Optional dictation hotkey support** for starting and stopping ChatGPT dictation from a physical keyboard *(experimental branch in progress)*
 
-Dictation hotkey support is planned, but it will ship only when it can preserve the transcript and return cleanly to the normal Enter-to-send workflow. In the currently tested ChatGPT Remote interface, the accessible **Stop** action discards the transcript and hides the composer, while **Send** stops recording and submits immediately. The roadmap work will remain isolated until ChatGPT exposes a reliable semantic stop-and-commit path; Enter2Send will not work around that limitation with coordinate maps, a custom keyboard, or a separate speech-recognition stack.
+The experiment implements an opt-in hybrid flow: F8 starts or stops dictation, while Enter during recording uses ChatGPT's existing Send action. It will ship only after both normal Chat and Remote preserve the transcript, return cleanly to the composer, and pass repeated real-device DeX testing. The implementation does not use coordinate maps, gesture injection, a custom keyboard, or a separate speech-recognition stack.
+
+### Emulator preflight (2026-07-21)
+
+- `Pixel_9_Pro_XL_API_35` booted successfully on Android 15 / API 35 without wiping AVD data.
+- The experimental debug APK installed, the accessibility service bound, and the status screen reported ON.
+- The F8 switch was confirmed off on first launch, could be changed, persisted normally, and was returned to off.
+- Injecting F8 outside ChatGPT left the service bound with no crash.
+- The official ChatGPT package was not installed. Its Play Store page opened in the unauthenticated Play Store activity, so normal Chat, Remote, microphone pass-through, and ChatGPT key-flow testing could not be attempted without user credentials.
+
+These results are preflight evidence only. Android 15 emulation cannot replace Android 16 / One UI / Samsung DeX acceptance on the target Galaxy device.
 
 ## Project boundaries
 

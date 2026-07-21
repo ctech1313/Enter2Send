@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Enter2Send</string>
-    <string name="service_description">Handles Enter only when the official ChatGPT message composer and its Send control are unambiguously identified. Prompt contents are never read or logged.</string>
+    <string name="service_description">Handles Enter and optional F8 dictation only when official ChatGPT controls are unambiguously identified. Prompt contents are never read or logged.</string>
     <string name="privacy_summary">Only affects the official ChatGPT message composer. No prompt text is read, stored, or logged.</string>
     <string name="open_accessibility_settings">Open accessibility settings</string>
     <string name="master_switch_label">Enter-to-send enabled</string>
+    <string name="dictation_switch_label">F8 dictation (experimental)</string>
     <string name="service_on">Accessibility service: ON</string>
     <string name="service_off">Accessibility service: OFF</string>
-    <string name="key_help">Enter / Numpad Enter: send\nShift+Enter: newline\n\nF8 dictation is not included because ChatGPT Remote does not expose a separate stop-and-commit action.</string>
+    <string name="key_help">Enter / Numpad Enter: send\nShift+Enter: newline\nF8: start or stop dictation\nEnter while dictating: send\n\nF8 is off by default and remains experimental until normal Chat and Remote pass DeX testing.</string>
 </resources>

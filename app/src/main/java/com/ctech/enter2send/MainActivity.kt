@@ -18,6 +18,7 @@ import android.widget.TextView
 class MainActivity : Activity() {
     private lateinit var serviceStatus: TextView
     private lateinit var masterSwitch: Switch
+    private lateinit var dictationSwitch: Switch
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,6 +68,15 @@ class MainActivity : Activity() {
             }
         }
         content.addView(masterSwitch)
+
+        dictationSwitch = Switch(this).apply {
+            text = getString(R.string.dictation_switch_label)
+            isChecked = BridgePreferences.isDictationEnabled(this@MainActivity)
+            setOnCheckedChangeListener { _, enabled ->
+                BridgePreferences.setDictationEnabled(this@MainActivity, enabled)
+            }
+        }
+        content.addView(dictationSwitch)
 
         content.addView(TextView(this).apply {
             text = getString(R.string.key_help)
