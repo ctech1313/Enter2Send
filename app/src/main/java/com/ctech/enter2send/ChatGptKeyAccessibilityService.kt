@@ -79,31 +79,27 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
 
         val session = refreshRecordingSession(root)
         if (session?.phase == DictationPhase.RECORDING) {
-            val controls = findActiveDictationControls(root) ?: run {
+            val stop = findUniqueDictationStop(root) ?: run {
                 resetDictationSession()
                 return false
             }
-            val focusSurface = session.surface
-            val composerAnchor = session.composerAnchor
-            val clicked = controls.send.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            val clicked = stop.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             if (clicked) {
                 consumedKeyCode = event.keyCode
-                resetDictationSession()
-                startComposerFocusRestore(focusSurface, composerAnchor)
+                beginStopping(session, DictationPhase.STOPPING_TO_SEND)
             }
             return clicked
         }
 
         if (session != null) return false
 
-        val composer = findUniqueFocusedEditableNode(root) ?: return false
+        val composer = findFocusedComposer(root) ?: return false
         val sendButton = findUniqueSendButtonNearComposer(composer) ?: return false
-        val focusSurface = surfaceForRoot(root)
         val composerAnchor = createComposerAnchor(composer)
         val clicked = sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         if (clicked) {
             consumedKeyCode = event.keyCode
-            startComposerFocusRestore(focusSurface, composerAnchor)
+            startComposerFocusRestore(composerAnchor)
         }
         return clicked
     }
@@ -125,38 +121,31 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         val session = refreshRecordingSession(root)
         if (session != null) {
             if (session.phase != DictationPhase.RECORDING) return false
-            val controls = findActiveDictationControls(root) ?: run {
+            val stop = findUniqueDictationStop(root) ?: run {
                 resetDictationSession()
                 return false
             }
-            val clicked = controls.stop.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            val clicked = stop.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             if (clicked) {
-                session.phase = DictationPhase.STOPPING
-                session.phaseStartedAt = SystemClock.uptimeMillis()
-                session.deadline = session.phaseStartedAt + STOP_TIMEOUT_MS
-                session.backAttempted = false
-                session.focusRequested = false
                 consumedKeyCode = KeyEvent.KEYCODE_F8
-                startTransitionPolling()
+                beginStopping(session, DictationPhase.STOPPING_TO_EDIT)
             }
             return clicked
         }
 
-        val composer = findUniqueFocusedEditableNode(root) ?: return false
+        val composer = findFocusedComposer(root) ?: return false
 
         // A visible Send control means the composer already contains user input.
         // F8 must never replace or submit that input.
         if (findUniqueSendButtonNearComposer(composer) != null) return false
 
-        val startTarget = findDictationStartTarget(root, composer) ?: return false
-        val clicked = startTarget.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        val startTarget = findRemoteDictationStartTarget(composer) ?: return false
+        val clicked = startTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         if (clicked) {
             val now = SystemClock.uptimeMillis()
             dictationSession = DictationSession(
-                surface = startTarget.surface,
                 composerAnchor = createComposerAnchor(composer),
                 phase = DictationPhase.STARTING,
-                phaseStartedAt = now,
                 deadline = now + START_TIMEOUT_MS
             )
             consumedKeyCode = KeyEvent.KEYCODE_F8
@@ -170,8 +159,12 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
 
     private fun refreshRecordingSession(root: AccessibilityNodeInfo): DictationSession? {
         val session = dictationSession ?: return null
+        if (root.windowId != session.composerAnchor.windowId) {
+            resetDictationSession()
+            return null
+        }
         if (session.phase == DictationPhase.STARTING) {
-            if (findActiveDictationControls(root) != null) {
+            if (findUniqueDictationStop(root) != null) {
                 session.phase = DictationPhase.RECORDING
                 cancelTransitionPolling()
             } else if (SystemClock.uptimeMillis() >= session.deadline) {
@@ -192,18 +185,23 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
                     resetDictationSession()
                     return
                 }
+                if (root.windowId != session.composerAnchor.windowId) {
+                    resetDictationSession()
+                    return
+                }
 
                 when (session.phase) {
                     DictationPhase.STARTING -> {
-                        if (findActiveDictationControls(root) != null) {
+                        if (findUniqueDictationStop(root) != null) {
                             session.phase = DictationPhase.RECORDING
                             transitionPoll = null
                             return
                         }
                     }
 
-                    DictationPhase.STOPPING -> {
-                        if (restoreComposerAfterStop(root, session)) {
+                    DictationPhase.STOPPING_TO_EDIT,
+                    DictationPhase.STOPPING_TO_SEND -> {
+                        if (completeStopTransition(root, session)) {
                             resetDictationSession()
                             return
                         }
@@ -227,30 +225,37 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         mainHandler.post(poll)
     }
 
-    private fun restoreComposerAfterStop(
+    private fun beginStopping(session: DictationSession, phase: DictationPhase) {
+        val now = SystemClock.uptimeMillis()
+        session.phase = phase
+        session.deadline = now + STOP_TIMEOUT_MS
+        session.focusRequested = false
+        startTransitionPolling()
+    }
+
+    private fun completeStopTransition(
         root: AccessibilityNodeInfo,
         session: DictationSession
     ): Boolean {
         val composer = findUniqueVisibleEditableNode(root)
-        if (composer != null && findUniqueSendButtonNearComposer(composer) != null) {
-            if (composer.isFocused) return true
-            if (!session.focusRequested) {
-                session.focusRequested = true
-                composer.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-            }
-            return findUniqueFocusedEditableNode(rootInActiveWindow ?: return false) != null
-        }
+        if (composer != null) {
+            val send = findUniqueSendButtonNearComposer(composer)
+            if (send != null) {
+                if (session.phase == DictationPhase.STOPPING_TO_SEND) {
+                    val clicked = send.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    if (clicked) startComposerFocusRestore(session.composerAnchor)
+                    return clicked
+                }
 
-        val recordingControlsRemain = findActiveDictationControls(root) != null
-        val backDelayElapsed =
-            SystemClock.uptimeMillis() - session.phaseStartedAt >= REMOTE_BACK_DELAY_MS
-        if (session.surface == DictationSurface.REMOTE &&
-            !recordingControlsRemain &&
-            !session.backAttempted &&
-            backDelayElapsed
-        ) {
-            session.backAttempted = true
-            performGlobalAction(GLOBAL_ACTION_BACK)
+                if (composer.isFocused) return true
+                if (!session.focusRequested) {
+                    session.focusRequested = true
+                    composer.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                }
+                return findFocusedComposer(rootInActiveWindow ?: return false)?.let {
+                    it == composer
+                } == true
+            }
         }
         return false
     }
@@ -265,14 +270,10 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         dictationSession = null
     }
 
-    private fun startComposerFocusRestore(
-        surface: DictationSurface,
-        composerAnchor: ComposerAnchor
-    ) {
+    private fun startComposerFocusRestore(composerAnchor: ComposerAnchor) {
         cancelComposerFocusRestore()
         val now = SystemClock.uptimeMillis()
         val request = ComposerFocusRequest(
-            surface = surface,
             composerAnchor = composerAnchor,
             startedAt = now,
             deadline = now + FOCUS_RESTORE_TIMEOUT_MS
@@ -293,9 +294,13 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
                     cancelComposerFocusRestore()
                     return
                 }
+                if (root.windowId != request.composerAnchor.windowId) {
+                    cancelComposerFocusRestore()
+                    return
+                }
 
                 val target = findComposerFocusTarget(root, request)
-                val focusedEditable = findUniqueFocusedEditableNode(root)
+                val focusedEditable = findFocusedComposer(root)
                 if (focusedEditable != null) {
                     val stillSettling = SystemClock.uptimeMillis() - request.startedAt <
                         FOCUS_RESTORE_SETTLE_MS
@@ -339,13 +344,14 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         root: AccessibilityNodeInfo,
         request: ComposerFocusRequest
     ): AccessibilityNodeInfo? {
-        if (surfaceForRoot(root) != request.surface) return null
+        if (root.windowId != request.composerAnchor.windowId) return null
         val composer = findUniqueVisibleEditableNode(root) ?: return null
         return composer.takeIf { matchesComposerAnchor(it, request.composerAnchor) }
     }
 
     private fun createComposerAnchor(composer: AccessibilityNodeInfo): ComposerAnchor =
         ComposerAnchor(
+            windowId = composer.windowId,
             className = composer.className?.toString(),
             viewIdResourceName = composer.viewIdResourceName,
             ancestorClassNames = composerAncestorClassNames(composer)
@@ -369,13 +375,6 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         return classNames
     }
 
-    private fun surfaceForRoot(root: AccessibilityNodeInfo): DictationSurface =
-        if (hasRemoteSurfaceIdentity(root)) {
-            DictationSurface.REMOTE
-        } else {
-            DictationSurface.NORMAL_CHAT
-        }
-
     private fun supportsAction(node: AccessibilityNodeInfo, action: Int): Boolean =
         node.actionList.any { it.id == action }
 
@@ -383,22 +382,6 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         composerFocusPoll?.let(mainHandler::removeCallbacks)
         composerFocusPoll = null
         composerFocusRequest = null
-    }
-
-    private fun findDictationStartTarget(
-        root: AccessibilityNodeInfo,
-        composer: AccessibilityNodeInfo
-    ): DictationStartTarget? {
-        val remoteSurface = hasRemoteSurfaceIdentity(root)
-        return if (remoteSurface) {
-            findRemoteDictationStartTarget(composer)?.let {
-                DictationStartTarget(DictationSurface.REMOTE, it)
-            }
-        } else {
-            findNormalChatDictationStartTarget(composer)?.let {
-                DictationStartTarget(DictationSurface.NORMAL_CHAT, it)
-            }
-        }
     }
 
     private fun findRemoteDictationStartTarget(
@@ -413,43 +396,13 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         return semanticTarget ?: findUniqueComposerLocalButtonTarget(scope, composer)
     }
 
-    private fun findNormalChatDictationStartTarget(
-        composer: AccessibilityNodeInfo
-    ): AccessibilityNodeInfo? {
-        var ancestor: AccessibilityNodeInfo? = composer
-        repeat(MAX_COMPOSER_ANCESTOR_LEVELS) {
-            ancestor = ancestor?.parent
-            val scope = ancestor ?: return null
-            val semanticTarget = findUniqueIdentityTarget(
-                scope,
-                DICTATION_START_DESCRIPTIONS,
-                DICTATION_START_VIEW_ID_SUFFIXES
-            )
-            if (semanticTarget != null) return semanticTarget
-        }
-
-        val immediateScope = composer.parent ?: return null
-        return findUniqueComposerLocalButtonTarget(immediateScope, composer)
-    }
-
-    private fun findActiveDictationControls(
+    private fun findUniqueDictationStop(
         root: AccessibilityNodeInfo
-    ): ActiveDictationControls? {
-        if (findUniqueVisibleEditableNode(root) != null) return null
-
-        val stop = findUniqueIdentityTarget(
+    ): AccessibilityNodeInfo? = findUniqueIdentityTarget(
             root,
             DICTATION_STOP_DESCRIPTIONS,
             DICTATION_STOP_VIEW_ID_SUFFIXES
-        ) ?: return null
-        val send = findUniqueIdentityTarget(
-            root,
-            SEND_DESCRIPTIONS,
-            SEND_VIEW_ID_SUFFIXES
-        ) ?: return null
-        if (stop == send || !shareNearbyAncestor(stop, send)) return null
-        return ActiveDictationControls(stop, send)
-    }
+        )
 
     private fun findUniqueComposerLocalButtonTarget(
         scope: AccessibilityNodeInfo,
@@ -479,36 +432,17 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         return candidates.singleOrNull()
     }
 
-    private fun hasRemoteSurfaceIdentity(root: AccessibilityNodeInfo): Boolean {
-        var found = false
-
-        fun visit(node: AccessibilityNodeInfo) {
-            if (found) return
-            if (node.packageName?.toString() == CHATGPT_PACKAGE &&
-                node.isVisibleToUser &&
-                node.isEnabled &&
-                !node.isEditable &&
-                (node.isClickable || node.className?.toString() == CLASS_BUTTON)
-            ) {
-                val description = node.contentDescription?.toString()?.trim()
-                val viewId = node.viewIdResourceName?.lowercase()
-                found = description != null && REMOTE_SURFACE_DESCRIPTIONS.any {
-                    it.equals(description, ignoreCase = true)
-                } || viewId != null && REMOTE_SURFACE_VIEW_ID_SUFFIXES.any(viewId::endsWith)
-            }
-            for (index in 0 until node.childCount) {
-                node.getChild(index)?.let(::visit)
-                if (found) return
-            }
-        }
-
-        visit(root)
-        return found
-    }
-
     private fun findUniqueFocusedEditableNode(
         root: AccessibilityNodeInfo
     ): AccessibilityNodeInfo? = findUniqueEditableNode(root, requireFocus = true)
+
+    private fun findFocusedComposer(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val inputFocus = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (inputFocus != null && isEditableComposerCandidate(inputFocus, requireFocus = true)) {
+            return inputFocus
+        }
+        return findUniqueFocusedEditableNode(root)
+    }
 
     private fun findUniqueVisibleEditableNode(
         root: AccessibilityNodeInfo
@@ -522,11 +456,7 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
 
         fun visit(node: AccessibilityNodeInfo) {
             if (matches.size > 1) return
-            val isComposerCandidate = node.packageName?.toString() == CHATGPT_PACKAGE &&
-                node.isVisibleToUser &&
-                node.isEnabled &&
-                node.isEditable &&
-                (!requireFocus || node.isFocused)
+            val isComposerCandidate = isEditableComposerCandidate(node, requireFocus)
             if (isComposerCandidate) matches += node
 
             for (index in 0 until node.childCount) {
@@ -538,6 +468,15 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         visit(root)
         return matches.singleOrNull()
     }
+
+    private fun isEditableComposerCandidate(
+        node: AccessibilityNodeInfo,
+        requireFocus: Boolean
+    ): Boolean = node.packageName?.toString() == CHATGPT_PACKAGE &&
+        node.isVisibleToUser &&
+        node.isEnabled &&
+        node.isEditable &&
+        (!requireFocus || node.isFocused)
 
     private fun findUniqueSendButtonNearComposer(
         composer: AccessibilityNodeInfo
@@ -667,55 +606,21 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         return false
     }
 
-    private fun shareNearbyAncestor(
-        first: AccessibilityNodeInfo,
-        second: AccessibilityNodeInfo
-    ): Boolean {
-        val firstAncestors = mutableListOf<AccessibilityNodeInfo>()
-        var current: AccessibilityNodeInfo? = first
-        var depth = 0
-        while (current != null && depth++ <= MAX_CONTROL_ANCESTOR_LEVELS) {
-            firstAncestors += current
-            current = current.parent
-        }
-
-        current = second
-        depth = 0
-        while (current != null && depth++ <= MAX_CONTROL_ANCESTOR_LEVELS) {
-            if (firstAncestors.any { it == current }) return true
-            current = current.parent
-        }
-        return false
-    }
-
-    private data class DictationStartTarget(
-        val surface: DictationSurface,
-        val node: AccessibilityNodeInfo
-    )
-
-    private data class ActiveDictationControls(
-        val stop: AccessibilityNodeInfo,
-        val send: AccessibilityNodeInfo
-    )
-
     private data class DictationSession(
-        val surface: DictationSurface,
         val composerAnchor: ComposerAnchor,
         var phase: DictationPhase,
-        var phaseStartedAt: Long,
         var deadline: Long,
-        var backAttempted: Boolean = false,
         var focusRequested: Boolean = false
     )
 
     private data class ComposerAnchor(
+        val windowId: Int,
         val className: String?,
         val viewIdResourceName: String?,
         val ancestorClassNames: List<String?>
     )
 
     private data class ComposerFocusRequest(
-        val surface: DictationSurface,
         val composerAnchor: ComposerAnchor,
         val startedAt: Long,
         val deadline: Long,
@@ -723,15 +628,11 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         var clickRequested: Boolean = false
     )
 
-    private enum class DictationSurface {
-        NORMAL_CHAT,
-        REMOTE
-    }
-
     private enum class DictationPhase {
         STARTING,
         RECORDING,
-        STOPPING
+        STOPPING_TO_EDIT,
+        STOPPING_TO_SEND
     }
 
     companion object {
@@ -740,14 +641,12 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         private const val CLASS_VIEW = "android.view.View"
         private const val MAX_COMPOSER_ANCESTOR_LEVELS = 5
         private const val MAX_COMPOSER_ANCHOR_ANCESTORS = 3
-        private const val MAX_CONTROL_ANCESTOR_LEVELS = 5
         private const val TRANSITION_POLL_INTERVAL_MS = 100L
         private const val FOCUS_RESTORE_POLL_INTERVAL_MS = 100L
         private const val FOCUS_RESTORE_SETTLE_MS = 300L
         private const val FOCUS_RESTORE_TIMEOUT_MS = 3_000L
         private const val START_TIMEOUT_MS = 2_500L
         private const val STOP_TIMEOUT_MS = 10_000L
-        private const val REMOTE_BACK_DELAY_MS = 500L
 
         private val DICTATION_START_DESCRIPTIONS = setOf(
             "Dictate",
@@ -778,16 +677,6 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
             "/send_button",
             "/send_message",
             "/send_message_button"
-        )
-        private val REMOTE_SURFACE_DESCRIPTIONS = setOf(
-            "Remote",
-            "Close Remote",
-            "Exit Remote"
-        )
-        private val REMOTE_SURFACE_VIEW_ID_SUFFIXES = setOf(
-            "/remote",
-            "/remote_header",
-            "/remote_mode"
         )
     }
 }

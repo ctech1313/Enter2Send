@@ -5,8 +5,8 @@
     <string name="privacy_summary">Only affects the official ChatGPT message composer. No prompt text is read, stored, or logged.</string>
     <string name="open_accessibility_settings">Open accessibility settings</string>
     <string name="master_switch_label">Enter-to-send enabled</string>
-    <string name="dictation_switch_label">F8 dictation (experimental)</string>
+    <string name="dictation_switch_label">F8 dictation (Remote only, experimental)</string>
     <string name="service_on">Accessibility service: ON</string>
     <string name="service_off">Accessibility service: OFF</string>
-    <string name="key_help">Enter / Numpad Enter: send\nShift+Enter: newline\nF8: start or stop dictation\nEnter while dictating: send\n\nF8 is off by default and remains experimental until normal Chat and Remote pass DeX testing.</string>
+    <string name="key_help">Enter / Numpad Enter: send\nShift+Enter: newline\nRemote only — F8: start or stop dictation\nRemote only — Enter while dictating: stop and send\n\nF8 is off by default. Normal Chat dictation is not supported because its control cannot be identified safely.</string>
 </resources>
