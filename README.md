@@ -18,8 +18,8 @@ Enter2Send is a small Android accessibility utility for people who use the offic
 | **Enter** in the focused ChatGPT composer | Sends the current message exactly once |
 | **Numpad Enter** in the focused composer | Sends through the explicit Android numpad key path |
 | **Shift+Enter** | Passes through to ChatGPT and inserts a newline |
-| **F8** with the experimental toggle enabled | Starts dictation, or stops it and returns the transcript for review |
-| **Enter while dictating** | Stops dictation and submits through ChatGPT's existing Send action |
+| **F8** in ChatGPT Remote with the opt-in toggle enabled | Starts dictation, or stops it and returns the transcript for review |
+| **Enter while Remote dictation is active** | Stops dictation and submits through ChatGPT's existing Send action |
 | Empty or ambiguous composer | Leaves Enter to ChatGPT's normal behavior |
 | Search, settings, login fields, or another app | Completely unaffected |
 | Enter2Send switch disabled | All keyboard input passes through unchanged |
@@ -33,7 +33,7 @@ The service acts only when Android exposes all of the following unambiguously:
 If any requirement is missing or ambiguous, Enter2Send does nothing and the key continues normally.
 
 > [!NOTE]
-> The signed v0.1.0 release contains only the verified Enter behavior. F8 support currently exists only on the isolated `experiment/remote-dictation` branch and is off by default. Its debug APK uses the separate package `com.ctech.enter2send.dictation`, allowing it to be installed beside v0.1.0; enable only one Enter2Send accessibility service at a time.
+> The optional F8 controls are deliberately limited to ChatGPT Remote, where the start and stop controls can be identified uniquely. Normal Chat keeps Enter-to-send, Shift+Enter, and composer refocus, but its dictation control is left untouched because ChatGPT does not expose enough accessibility semantics to identify it safely. F8 is off by default.
 
 ## Why this exists
 
@@ -50,6 +50,8 @@ Real-device Samsung DeX testing passed with:
 - **ChatGPT:** `1.2026.195(12)`
 - **Verified:** Enter sends exactly once; Shift+Enter inserts a newline
 - **Numpad Enter:** Explicit keycode path emulator-tested; physical verification is pending because the target keyboard has no numpad
+- **Remote dictation:** Optional F8 start/stop and Enter-to-submit; disabled by default
+- **Normal Chat dictation:** Not remapped because its control cannot be identified unambiguously
 
 ChatGPT updates may change its accessibility hierarchy. When a future version no longer exposes a unique composer or Send control, Enter2Send is designed to fail open and leave the key untouched.
 
@@ -57,7 +59,7 @@ ChatGPT updates may change its accessibility hierarchy. When a future version no
 
 Download the signed APK from the [latest GitHub release](https://github.com/ctech1313/Enter2Send/releases/latest):
 
-1. Download `Enter2Send-v0.1.0.apk` and its `.sha256` checksum file.
+1. Download `Enter2Send-v0.2.0.apk` and its `.sha256` checksum file.
 2. Confirm the APK's SHA-256 matches the published checksum.
 3. Allow your browser or file manager to install unknown apps when Android prompts you.
 4. Install and open **Enter2Send**.
@@ -69,7 +71,7 @@ Download the signed APK from the [latest GitHub release](https://github.com/ctec
 Verify the download in PowerShell with:
 
 ```powershell
-(Get-FileHash .\Enter2Send-v0.1.0.apk -Algorithm SHA256).Hash
+(Get-FileHash .\Enter2Send-v0.2.0.apk -Algorithm SHA256).Hash
 ```
 
 The release notes also publish the signing-certificate SHA-256 fingerprint. Every official update will use the same signing identity.
@@ -100,6 +102,7 @@ The in-app switch pauses interception without revoking accessibility access. Dis
 3. Press Enter in ChatGPT search/settings and in another application. Behavior should remain normal.
 4. Disable the in-app switch and confirm Enter2Send stops intercepting immediately.
 5. If your keyboard has a numpad, confirm Numpad Enter sends once.
+6. In Remote, enable the separate F8 toggle and confirm F8 starts dictation, F8 stops to an editable transcript, and Enter while recording submits once.
 
 </details>
 
@@ -116,7 +119,7 @@ Enter2Send intentionally has a small trust boundary:
 - No generalized key-remapping interface
 - No custom keyboard or input method
 
-The accessibility service is package-restricted to the official ChatGPT Android app. The stable release consumes only handled Enter and Numpad Enter events. The experimental branch may also consume F8 when its separate opt-in switch is enabled and a unique ChatGPT dictation action is present.
+The accessibility service is package-restricted to the official ChatGPT Android app. It consumes only handled Enter and Numpad Enter events, plus F8 when its separate opt-in switch is enabled and unique Remote dictation controls are present.
 
 ## Troubleshooting
 
@@ -137,9 +140,10 @@ The accessibility service is package-restricted to the official ChatGPT Android 
 - [x] Shift+Enter inserts a newline
 - [x] Samsung DeX verification on the target Galaxy device
 - [ ] Physical Numpad Enter verification
-- [ ] **Optional dictation hotkey support** for starting and stopping ChatGPT dictation from a physical keyboard *(experimental branch in progress)*
+- [x] **Optional Remote dictation hotkey support** for starting and stopping dictation from a physical keyboard
+- [ ] Normal Chat dictation hotkey support, if ChatGPT exposes a uniquely identifiable control
 
-The experiment implements an opt-in hybrid flow: F8 starts or stops dictation, while Enter during recording uses ChatGPT's existing Send action. It will ship only after both normal Chat and Remote preserve the transcript, return cleanly to the composer, and pass repeated real-device DeX testing. The implementation does not use coordinate maps, gesture injection, a custom keyboard, or a separate speech-recognition stack.
+The opt-in Remote flow uses F8 to start or stop dictation, while Enter during recording uses ChatGPT's existing Send action. Normal Chat support remains intentionally unavailable until its dictation control can be identified without coordinates or structural guesses. The implementation does not use coordinate maps, gesture injection, a custom keyboard, or a separate speech-recognition stack.
 
 ### Emulator preflight (2026-07-21)
 
