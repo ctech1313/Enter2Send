@@ -50,11 +50,6 @@ android {
     }
 
     buildTypes {
-        debug {
-            applicationIdSuffix = ".dictation"
-            versionNameSuffix = "-dictation"
-            resValue("string", "app_name", "Enter2Send Dictation")
-        }
         release {
             isDebuggable = false
             isMinifyEnabled = false

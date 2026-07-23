@@ -10,56 +10,37 @@ import android.view.accessibility.AccessibilityNodeInfo
 
 class ChatGptKeyAccessibilityService : AccessibilityService() {
     private var consumedKeyCode: Int? = null
-    private var dictationSession: DictationSession? = null
+    private var sendOperation: SendOperation? = null
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var transitionPoll: Runnable? = null
-    private var composerFocusPoll: Runnable? = null
-    private var composerFocusRequest: ComposerFocusRequest? = null
+    private var sendPoll: Runnable? = null
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.packageName?.toString() != CHATGPT_PACKAGE) {
-            resetDictationSession()
-            cancelComposerFocusRestore()
+            resetSendOperation()
         }
     }
 
     override fun onInterrupt() {
         consumedKeyCode = null
-        resetDictationSession()
-        cancelComposerFocusRestore()
+        resetSendOperation()
     }
 
     override fun onDestroy() {
         consumedKeyCode = null
-        resetDictationSession()
-        cancelComposerFocusRestore()
+        resetSendOperation()
         super.onDestroy()
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
         if (!BridgePreferences.isMasterEnabled(this)) {
             consumedKeyCode = null
-            resetDictationSession()
-            cancelComposerFocusRestore()
+            resetSendOperation()
             return false
-        }
-
-        if (event.keyCode == KeyEvent.KEYCODE_F8) {
-            if (!BridgePreferences.isDictationEnabled(this)) {
-                resetDictationSession()
-                return false
-            }
-            return handleF8(event)
         }
 
         if (event.keyCode != KeyEvent.KEYCODE_ENTER &&
             event.keyCode != KeyEvent.KEYCODE_NUMPAD_ENTER
         ) {
-            return false
-        }
-
-        if (event.isShiftPressed) {
-            consumedKeyCode = null
             return false
         }
 
@@ -70,28 +51,16 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         }
 
         if (event.action != KeyEvent.ACTION_DOWN) return false
-        if (event.repeatCount > 0 && consumedKeyCode == event.keyCode) return true
+        if (event.isShiftPressed) return false
+        if (event.repeatCount > 0) return consumedKeyCode == event.keyCode
 
         val root = chatGptRoot() ?: run {
-            resetDictationSession()
+            resetSendOperation()
             return false
         }
 
-        val session = refreshRecordingSession(root)
-        if (session?.phase == DictationPhase.RECORDING) {
-            val stop = findUniqueDictationStop(root) ?: run {
-                resetDictationSession()
-                return false
-            }
-            val clicked = stop.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            if (clicked) {
-                consumedKeyCode = event.keyCode
-                beginStopping(session, DictationPhase.STOPPING_TO_SEND)
-            }
-            return clicked
-        }
-
-        if (session != null) return false
+        refreshSendOperation(root)
+        if (sendOperation != null) return false
 
         val composer = findFocusedComposer(root) ?: return false
         val sendButton = findUniqueSendButtonNearComposer(composer) ?: return false
@@ -99,58 +68,7 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         val clicked = sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         if (clicked) {
             consumedKeyCode = event.keyCode
-            startComposerFocusRestore(composerAnchor)
-        }
-        return clicked
-    }
-
-    private fun handleF8(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_UP) {
-            val consume = consumedKeyCode == KeyEvent.KEYCODE_F8
-            consumedKeyCode = null
-            return consume
-        }
-        if (event.action != KeyEvent.ACTION_DOWN) return false
-        if (!event.hasNoModifiers()) return false
-        if (event.repeatCount > 0 && consumedKeyCode == KeyEvent.KEYCODE_F8) return true
-
-        val root = chatGptRoot() ?: run {
-            resetDictationSession()
-            return false
-        }
-
-        val session = refreshRecordingSession(root)
-        if (session != null) {
-            if (session.phase != DictationPhase.RECORDING) return false
-            val stop = findUniqueDictationStop(root) ?: run {
-                resetDictationSession()
-                return false
-            }
-            val clicked = stop.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            if (clicked) {
-                consumedKeyCode = KeyEvent.KEYCODE_F8
-                beginStopping(session, DictationPhase.STOPPING_TO_EDIT)
-            }
-            return clicked
-        }
-
-        val composer = findFocusedComposer(root) ?: return false
-
-        // A visible Send control means the composer already contains user input.
-        // F8 must never replace or submit that input.
-        if (findUniqueSendButtonNearComposer(composer) != null) return false
-
-        val startTarget = findRemoteDictationStartTarget(composer) ?: return false
-        val clicked = startTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        if (clicked) {
-            val now = SystemClock.uptimeMillis()
-            dictationSession = DictationSession(
-                composerAnchor = createComposerAnchor(composer),
-                phase = DictationPhase.STARTING,
-                deadline = now + START_TIMEOUT_MS
-            )
-            consumedKeyCode = KeyEvent.KEYCODE_F8
-            startTransitionPolling()
+            beginSendConfirmation(composerAnchor)
         }
         return clicked
     }
@@ -158,197 +76,196 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
     private fun chatGptRoot(): AccessibilityNodeInfo? =
         rootInActiveWindow?.takeIf { it.packageName?.toString() == CHATGPT_PACKAGE }
 
-    private fun refreshRecordingSession(root: AccessibilityNodeInfo): DictationSession? {
-        val session = dictationSession ?: return null
-        if (root.windowId != session.composerAnchor.windowId) {
-            resetDictationSession()
-            return null
-        }
-        if (session.phase == DictationPhase.STARTING) {
-            if (findUniqueDictationStop(root) != null) {
-                session.phase = DictationPhase.RECORDING
-                cancelTransitionPolling()
-            } else if (SystemClock.uptimeMillis() >= session.deadline) {
-                resetDictationSession()
-                return null
-            }
-        }
-        return dictationSession
-    }
-
-    private fun startTransitionPolling() {
-        cancelTransitionPolling()
-        val poll = object : Runnable {
-            override fun run() {
-                val session = dictationSession ?: return
-                val root = chatGptRoot()
-                if (root == null) {
-                    resetDictationSession()
-                    return
-                }
-                if (root.windowId != session.composerAnchor.windowId) {
-                    resetDictationSession()
-                    return
-                }
-
-                when (session.phase) {
-                    DictationPhase.STARTING -> {
-                        if (findUniqueDictationStop(root) != null) {
-                            session.phase = DictationPhase.RECORDING
-                            transitionPoll = null
-                            return
-                        }
-                    }
-
-                    DictationPhase.STOPPING_TO_EDIT,
-                    DictationPhase.STOPPING_TO_SEND -> {
-                        if (completeStopTransition(root, session)) {
-                            resetDictationSession()
-                            return
-                        }
-                    }
-
-                    DictationPhase.RECORDING -> {
-                        transitionPoll = null
-                        return
-                    }
-                }
-
-                if (SystemClock.uptimeMillis() >= session.deadline) {
-                    resetDictationSession()
-                    return
-                }
-
-                mainHandler.postDelayed(this, TRANSITION_POLL_INTERVAL_MS)
-            }
-        }
-        transitionPoll = poll
-        mainHandler.post(poll)
-    }
-
-    private fun beginStopping(session: DictationSession, phase: DictationPhase) {
+    private fun beginSendConfirmation(composerAnchor: ComposerAnchor) {
         val now = SystemClock.uptimeMillis()
-        session.phase = phase
-        session.deadline = now + STOP_TIMEOUT_MS
-        session.focusRequested = false
-        startTransitionPolling()
-    }
-
-    private fun completeStopTransition(
-        root: AccessibilityNodeInfo,
-        session: DictationSession
-    ): Boolean {
-        val composer = findUniqueVisibleEditableNode(root)
-        if (composer != null) {
-            val send = findUniqueSendButtonNearComposer(composer)
-            if (send != null) {
-                if (session.phase == DictationPhase.STOPPING_TO_SEND) {
-                    val clicked = send.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    if (clicked) startComposerFocusRestore(session.composerAnchor)
-                    return clicked
-                }
-
-                if (composer.isFocused) return true
-                if (!session.focusRequested) {
-                    session.focusRequested = true
-                    composer.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-                }
-                return findFocusedComposer(rootInActiveWindow ?: return false)?.let {
-                    it == composer
-                } == true
-            }
-        }
-        return false
-    }
-
-    private fun cancelTransitionPolling() {
-        transitionPoll?.let(mainHandler::removeCallbacks)
-        transitionPoll = null
-    }
-
-    private fun resetDictationSession() {
-        cancelTransitionPolling()
-        dictationSession = null
-    }
-
-    private fun startComposerFocusRestore(composerAnchor: ComposerAnchor) {
-        cancelComposerFocusRestore()
-        val now = SystemClock.uptimeMillis()
-        val request = ComposerFocusRequest(
+        sendOperation = SendOperation.AwaitingClear(
             composerAnchor = composerAnchor,
-            startedAt = now,
-            deadline = now + FOCUS_RESTORE_TIMEOUT_MS
+            deadline = now + SEND_CONFIRM_TIMEOUT_MS
         )
-        composerFocusRequest = request
+        startSendPolling()
+    }
 
+    private fun refreshSendOperation(root: AccessibilityNodeInfo) {
+        val operation = sendOperation ?: return
+        if (root.windowId != operation.composerAnchor.windowId) {
+            resetSendOperation()
+            return
+        }
+
+        val focusedComposer = findFocusedComposer(root)
+        if (focusedComposer != null &&
+            !matchesComposerAnchor(focusedComposer, operation.composerAnchor)
+        ) {
+            resetSendOperation()
+            return
+        }
+
+        val now = SystemClock.uptimeMillis()
+        when (operation) {
+            is SendOperation.AwaitingClear -> {
+                if (now >= operation.deadline) {
+                    resetSendOperation()
+                    return
+                }
+
+                val composer = findAnchoredComposer(root, operation.composerAnchor)
+                if (composer == null) {
+                    operation.clearPolls = 0
+                    return
+                }
+
+                when (findSendButtonNearComposer(composer)) {
+                    SendButtonMatch.Absent -> {
+                        operation.clearPolls += 1
+                        if (operation.clearPolls >= SEND_CLEAR_CONFIRM_POLLS) {
+                            beginRefocusing(operation.composerAnchor, composer, now)
+                        }
+                    }
+
+                    is SendButtonMatch.Unique,
+                    SendButtonMatch.Ambiguous -> operation.clearPolls = 0
+                }
+            }
+
+            is SendOperation.Refocusing -> {
+                if (now >= operation.deadline) {
+                    resetSendOperation()
+                    return
+                }
+
+                val composer = findAnchoredComposer(root, operation.composerAnchor)
+                    ?: return
+                advanceRefocus(operation, composer, now)
+            }
+        }
+    }
+
+    private fun beginRefocusing(
+        composerAnchor: ComposerAnchor,
+        composer: AccessibilityNodeInfo,
+        now: Long
+    ) {
+        val operation = SendOperation.Refocusing(
+            composerAnchor = composerAnchor,
+            deadline = now + FOCUS_RESTORE_TIMEOUT_MS,
+            clickAllowedAt = now + FOCUS_CLICK_FALLBACK_DELAY_MS
+        )
+        sendOperation = operation
+        advanceRefocus(operation, composer, now)
+    }
+
+    private fun advanceRefocus(
+        operation: SendOperation.Refocusing,
+        composer: AccessibilityNodeInfo,
+        now: Long
+    ) {
+        if (composer.isFocused) {
+            resetSendOperation()
+            return
+        }
+
+        if (!operation.focusAttempted) {
+            operation.focusAttempted = true
+            if (supportsAction(composer, AccessibilityNodeInfo.ACTION_FOCUS)) {
+                composer.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            }
+            return
+        }
+
+        if (!operation.clickAttempted &&
+            now >= operation.clickAllowedAt &&
+            supportsAction(composer, AccessibilityNodeInfo.ACTION_CLICK)
+        ) {
+            operation.clickAttempted = true
+            composer.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }
+    }
+
+    private fun startSendPolling() {
+        cancelSendPolling()
         val poll = object : Runnable {
             override fun run() {
-                if (composerFocusRequest !== request ||
-                    !BridgePreferences.isMasterEnabled(this@ChatGptKeyAccessibilityService)
-                ) {
-                    cancelComposerFocusRestore()
+                if (sendOperation == null) {
+                    sendPoll = null
+                    return
+                }
+                if (!BridgePreferences.isMasterEnabled(this@ChatGptKeyAccessibilityService)) {
+                    resetSendOperation()
                     return
                 }
 
                 val root = chatGptRoot()
                 if (root == null) {
-                    cancelComposerFocusRestore()
-                    return
-                }
-                if (root.windowId != request.composerAnchor.windowId) {
-                    cancelComposerFocusRestore()
+                    resetSendOperation()
                     return
                 }
 
-                val target = findComposerFocusTarget(root, request)
-                val focusedEditable = findFocusedComposer(root)
-                if (focusedEditable != null) {
-                    val stillSettling = SystemClock.uptimeMillis() - request.startedAt <
-                        FOCUS_RESTORE_SETTLE_MS
-                    val matchesOriginalComposer =
-                        matchesComposerAnchor(focusedEditable, request.composerAnchor)
-                    if (!stillSettling || !matchesOriginalComposer) {
-                        // Respect focus the user placed and accept a composer that
-                        // remained focused after the send transition settled.
-                        cancelComposerFocusRestore()
-                        return
-                    }
+                refreshSendOperation(root)
+                if (sendOperation != null) {
+                    mainHandler.postDelayed(this, SEND_POLL_INTERVAL_MS)
+                } else {
+                    sendPoll = null
                 }
-
-                if (focusedEditable == null && target != null) {
-                    if (!request.focusRequested) {
-                        request.focusRequested = true
-                        if (supportsAction(target, AccessibilityNodeInfo.ACTION_FOCUS)) {
-                            target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-                        }
-                    } else if (!request.clickRequested &&
-                        supportsAction(target, AccessibilityNodeInfo.ACTION_CLICK)
-                    ) {
-                        request.clickRequested = true
-                        target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    }
-                }
-
-                if (SystemClock.uptimeMillis() >= request.deadline) {
-                    cancelComposerFocusRestore()
-                    return
-                }
-
-                mainHandler.postDelayed(this, FOCUS_RESTORE_POLL_INTERVAL_MS)
             }
         }
-        composerFocusPoll = poll
+        sendPoll = poll
         mainHandler.post(poll)
     }
 
-    private fun findComposerFocusTarget(
-        root: AccessibilityNodeInfo,
-        request: ComposerFocusRequest
-    ): AccessibilityNodeInfo? {
-        if (root.windowId != request.composerAnchor.windowId) return null
-        val composer = findUniqueVisibleEditableNode(root) ?: return null
-        return composer.takeIf { matchesComposerAnchor(it, request.composerAnchor) }
+    private fun cancelSendPolling() {
+        sendPoll?.let(mainHandler::removeCallbacks)
+        sendPoll = null
     }
+
+    private fun resetSendOperation() {
+        cancelSendPolling()
+        sendOperation = null
+    }
+
+    private fun findFocusedComposer(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val inputFocus = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (inputFocus != null && isEditableComposerCandidate(inputFocus, requireFocus = true)) {
+            return inputFocus
+        }
+        return findUniqueEditableNode(root, requireFocus = true)
+    }
+
+    private fun findAnchoredComposer(
+        root: AccessibilityNodeInfo,
+        composerAnchor: ComposerAnchor
+    ): AccessibilityNodeInfo? {
+        val composer = findUniqueEditableNode(root, requireFocus = false) ?: return null
+        return composer.takeIf { matchesComposerAnchor(it, composerAnchor) }
+    }
+
+    private fun findUniqueEditableNode(
+        root: AccessibilityNodeInfo,
+        requireFocus: Boolean
+    ): AccessibilityNodeInfo? {
+        val matches = mutableListOf<AccessibilityNodeInfo>()
+
+        fun visit(node: AccessibilityNodeInfo) {
+            if (matches.size > 1) return
+            if (isEditableComposerCandidate(node, requireFocus)) matches += node
+
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let(::visit)
+                if (matches.size > 1) return
+            }
+        }
+
+        visit(root)
+        return matches.singleOrNull()
+    }
+
+    private fun isEditableComposerCandidate(
+        node: AccessibilityNodeInfo,
+        requireFocus: Boolean
+    ): Boolean = node.packageName?.toString() == CHATGPT_PACKAGE &&
+        node.isVisibleToUser &&
+        node.isEnabled &&
+        node.isEditable &&
+        (!requireFocus || node.isFocused)
 
     private fun createComposerAnchor(composer: AccessibilityNodeInfo): ComposerAnchor =
         ComposerAnchor(
@@ -376,87 +293,18 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         return classNames
     }
 
-    private fun supportsAction(node: AccessibilityNodeInfo, action: Int): Boolean =
-        node.actionList.any { it.id == action }
-
-    private fun cancelComposerFocusRestore() {
-        composerFocusPoll?.let(mainHandler::removeCallbacks)
-        composerFocusPoll = null
-        composerFocusRequest = null
-    }
-
-    private fun findRemoteDictationStartTarget(
-        composer: AccessibilityNodeInfo
-    ): AccessibilityNodeInfo? {
-        val scope = composer.parent ?: return null
-        return findUniqueIdentityTarget(
-            scope,
-            DICTATION_START_DESCRIPTIONS,
-            DICTATION_START_VIEW_ID_SUFFIXES
-        )
-    }
-
-    private fun findUniqueDictationStop(
-        root: AccessibilityNodeInfo
-    ): AccessibilityNodeInfo? = findUniqueIdentityTarget(
-            root,
-            DICTATION_STOP_DESCRIPTIONS,
-            DICTATION_STOP_VIEW_ID_SUFFIXES
-        )
-
-    private fun findUniqueFocusedEditableNode(
-        root: AccessibilityNodeInfo
-    ): AccessibilityNodeInfo? = findUniqueEditableNode(root, requireFocus = true)
-
-    private fun findFocusedComposer(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        val inputFocus = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        if (inputFocus != null && isEditableComposerCandidate(inputFocus, requireFocus = true)) {
-            return inputFocus
-        }
-        return findUniqueFocusedEditableNode(root)
-    }
-
-    private fun findUniqueVisibleEditableNode(
-        root: AccessibilityNodeInfo
-    ): AccessibilityNodeInfo? = findUniqueEditableNode(root, requireFocus = false)
-
-    private fun findUniqueEditableNode(
-        root: AccessibilityNodeInfo,
-        requireFocus: Boolean
-    ): AccessibilityNodeInfo? {
-        val matches = mutableListOf<AccessibilityNodeInfo>()
-
-        fun visit(node: AccessibilityNodeInfo) {
-            if (matches.size > 1) return
-            val isComposerCandidate = isEditableComposerCandidate(node, requireFocus)
-            if (isComposerCandidate) matches += node
-
-            for (index in 0 until node.childCount) {
-                node.getChild(index)?.let(::visit)
-                if (matches.size > 1) return
-            }
-        }
-
-        visit(root)
-        return matches.singleOrNull()
-    }
-
-    private fun isEditableComposerCandidate(
-        node: AccessibilityNodeInfo,
-        requireFocus: Boolean
-    ): Boolean = node.packageName?.toString() == CHATGPT_PACKAGE &&
-        node.isVisibleToUser &&
-        node.isEnabled &&
-        node.isEditable &&
-        (!requireFocus || node.isFocused)
-
     private fun findUniqueSendButtonNearComposer(
         composer: AccessibilityNodeInfo
-    ): AccessibilityNodeInfo? {
+    ): AccessibilityNodeInfo? =
+        (findSendButtonNearComposer(composer) as? SendButtonMatch.Unique)?.node
+
+    private fun findSendButtonNearComposer(
+        composer: AccessibilityNodeInfo
+    ): SendButtonMatch {
         var ancestor: AccessibilityNodeInfo? = composer
         repeat(MAX_COMPOSER_ANCESTOR_LEVELS) {
             ancestor = ancestor?.parent
-            val scope = ancestor ?: return null
+            val scope = ancestor ?: return SendButtonMatch.Absent
             val candidates = mutableListOf<AccessibilityNodeInfo>()
             collectIdentityTargets(
                 scope,
@@ -466,21 +314,11 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
                 candidates
             )
             when (candidates.size) {
-                1 -> return candidates.single()
-                in 2..Int.MAX_VALUE -> return null
+                1 -> return SendButtonMatch.Unique(candidates.single())
+                in 2..Int.MAX_VALUE -> return SendButtonMatch.Ambiguous
             }
         }
-        return null
-    }
-
-    private fun findUniqueIdentityTarget(
-        root: AccessibilityNodeInfo,
-        descriptions: Set<String>,
-        viewIdSuffixes: Set<String>
-    ): AccessibilityNodeInfo? {
-        val candidates = mutableListOf<AccessibilityNodeInfo>()
-        collectIdentityTargets(root, null, descriptions, viewIdSuffixes, candidates)
-        return candidates.singleOrNull()
+        return SendButtonMatch.Absent
     }
 
     private fun collectIdentityTargets(
@@ -519,7 +357,7 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
             node.isVisibleToUser &&
             node.isEnabled &&
             node.isClickable &&
-            node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
+            supportsAction(node, AccessibilityNodeInfo.ACTION_CLICK)
 
     private fun isIdentityBearingActionNode(node: AccessibilityNodeInfo): Boolean {
         if (node.packageName?.toString() != CHATGPT_PACKAGE ||
@@ -549,12 +387,33 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         return viewIdSuffixes.any(viewId::endsWith)
     }
 
-    private data class DictationSession(
-        val composerAnchor: ComposerAnchor,
-        var phase: DictationPhase,
-        var deadline: Long,
-        var focusRequested: Boolean = false
-    )
+    private fun supportsAction(node: AccessibilityNodeInfo, action: Int): Boolean =
+        node.actionList.any { it.id == action }
+
+    private sealed class SendOperation {
+        abstract val composerAnchor: ComposerAnchor
+        abstract val deadline: Long
+
+        data class AwaitingClear(
+            override val composerAnchor: ComposerAnchor,
+            override val deadline: Long,
+            var clearPolls: Int = 0
+        ) : SendOperation()
+
+        data class Refocusing(
+            override val composerAnchor: ComposerAnchor,
+            override val deadline: Long,
+            val clickAllowedAt: Long,
+            var focusAttempted: Boolean = false,
+            var clickAttempted: Boolean = false
+        ) : SendOperation()
+    }
+
+    private sealed class SendButtonMatch {
+        data object Absent : SendButtonMatch()
+        data class Unique(val node: AccessibilityNodeInfo) : SendButtonMatch()
+        data object Ambiguous : SendButtonMatch()
+    }
 
     private data class ComposerAnchor(
         val windowId: Int,
@@ -563,57 +422,18 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         val ancestorClassNames: List<String?>
     )
 
-    private data class ComposerFocusRequest(
-        val composerAnchor: ComposerAnchor,
-        val startedAt: Long,
-        val deadline: Long,
-        var focusRequested: Boolean = false,
-        var clickRequested: Boolean = false
-    )
-
-    private enum class DictationPhase {
-        STARTING,
-        RECORDING,
-        STOPPING_TO_EDIT,
-        STOPPING_TO_SEND
-    }
-
     companion object {
         private const val CHATGPT_PACKAGE = "com.openai.chatgpt"
         private const val CLASS_BUTTON = "android.widget.Button"
         private const val CLASS_VIEW = "android.view.View"
         private const val MAX_COMPOSER_ANCESTOR_LEVELS = 5
         private const val MAX_COMPOSER_ANCHOR_ANCESTORS = 3
-        private const val TRANSITION_POLL_INTERVAL_MS = 100L
-        private const val FOCUS_RESTORE_POLL_INTERVAL_MS = 100L
-        private const val FOCUS_RESTORE_SETTLE_MS = 300L
+        private const val SEND_POLL_INTERVAL_MS = 100L
+        private const val SEND_CONFIRM_TIMEOUT_MS = 3_000L
+        private const val SEND_CLEAR_CONFIRM_POLLS = 2
         private const val FOCUS_RESTORE_TIMEOUT_MS = 3_000L
-        private const val START_TIMEOUT_MS = 2_500L
-        private const val STOP_TIMEOUT_MS = 10_000L
+        private const val FOCUS_CLICK_FALLBACK_DELAY_MS = 250L
 
-        private val DICTATION_START_DESCRIPTIONS = setOf(
-            "Dictate",
-            "Start dictation",
-            "Voice input",
-            "Microphone"
-        )
-        private val DICTATION_START_VIEW_ID_SUFFIXES = setOf(
-            "/dictate",
-            "/dictation",
-            "/microphone",
-            "/voice_input"
-        )
-        private val DICTATION_STOP_DESCRIPTIONS = setOf(
-            "Stop",
-            "Stop dictation",
-            "Stop recording",
-            "Done dictating"
-        )
-        private val DICTATION_STOP_VIEW_ID_SUFFIXES = setOf(
-            "/stop",
-            "/stop_dictation",
-            "/stop_recording"
-        )
         private val SEND_DESCRIPTIONS = setOf("Send", "Send message")
         private val SEND_VIEW_ID_SUFFIXES = setOf(
             "/send",

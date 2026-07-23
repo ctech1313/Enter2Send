@@ -18,8 +18,7 @@ Enter2Send is a small Android accessibility utility for people who use the offic
 | **Enter** in the focused ChatGPT composer | Sends the current message exactly once |
 | **Numpad Enter** in the focused composer | Sends through the explicit Android numpad key path |
 | **Shift+Enter** | Passes through to ChatGPT and inserts a newline |
-| **F8** in ChatGPT Remote with the opt-in toggle enabled | Starts dictation, or stops it and returns the transcript for review |
-| **Enter while Remote dictation is active** | Stops dictation and submits through ChatGPT's existing Send action |
+| After a successful send | Waits for ChatGPT to clear the Send control, then restores composer focus |
 | Empty or ambiguous composer | Leaves Enter to ChatGPT's normal behavior |
 | Search, settings, login fields, or another app | Completely unaffected |
 | Enter2Send switch disabled | All keyboard input passes through unchanged |
@@ -31,9 +30,6 @@ The service acts only when Android exposes all of the following unambiguously:
 3. There is one nearby visible, enabled Send action.
 
 If any requirement is missing or ambiguous, Enter2Send does nothing and the key continues normally.
-
-> [!NOTE]
-> The optional F8 controls are deliberately limited to ChatGPT Remote, where the start and stop controls can be identified uniquely. Normal Chat keeps Enter-to-send, Shift+Enter, and composer refocus, but its dictation control is left untouched because ChatGPT does not expose enough accessibility semantics to identify it safely. F8 is off by default.
 
 ## Why this exists
 
@@ -48,10 +44,8 @@ Real-device Samsung DeX testing passed with:
 - **Device:** Galaxy S23 Ultra
 - **OS:** Android 16 / One UI 8.5
 - **ChatGPT:** `1.2026.195(12)`
-- **Verified:** Enter sends exactly once; Shift+Enter inserts a newline
+- **Verified:** Enter sends exactly once, focus returns for an immediate second send, and Shift+Enter inserts a newline
 - **Numpad Enter:** Explicit keycode path emulator-tested; physical verification is pending because the target keyboard has no numpad
-- **Remote dictation:** Optional F8 start/stop and Enter-to-submit; disabled by default
-- **Normal Chat dictation:** Not remapped because its control cannot be identified unambiguously
 
 ChatGPT updates may change its accessibility hierarchy. When a future version no longer exposes a unique composer or Send control, Enter2Send is designed to fail open and leave the key untouched.
 
@@ -102,7 +96,7 @@ The in-app switch pauses interception without revoking accessibility access. Dis
 3. Press Enter in ChatGPT search/settings and in another application. Behavior should remain normal.
 4. Disable the in-app switch and confirm Enter2Send stops intercepting immediately.
 5. If your keyboard has a numpad, confirm Numpad Enter sends once.
-6. In Remote, enable the separate F8 toggle and confirm F8 starts dictation, F8 stops to an editable transcript, and Enter while recording submits once.
+6. Without clicking the composer again, type and send a second message with one Enter press.
 
 </details>
 
@@ -119,7 +113,7 @@ Enter2Send intentionally has a small trust boundary:
 - No generalized key-remapping interface
 - No custom keyboard or input method
 
-The accessibility service is package-restricted to the official ChatGPT Android app. It consumes only handled Enter and Numpad Enter events, plus F8 when its separate opt-in switch is enabled and unique Remote dictation controls are present.
+The accessibility service is package-restricted to the official ChatGPT Android app. Only handled Enter and Numpad Enter events are consumed; all other key events return immediately.
 
 ## Troubleshooting
 
@@ -138,12 +132,12 @@ The accessibility service is package-restricted to the official ChatGPT Android 
 
 - [x] Enter sends from the focused ChatGPT composer
 - [x] Shift+Enter inserts a newline
+- [x] Restore composer focus only after ChatGPT confirms the send transition
 - [x] Samsung DeX verification on the target Galaxy device
 - [ ] Physical Numpad Enter verification
-- [x] **Optional Remote dictation hotkey support** for starting and stopping dictation from a physical keyboard
-- [ ] Normal Chat dictation hotkey support, if ChatGPT exposes a uniquely identifiable control
+- [ ] **Optional dictation hotkey support** if ChatGPT exposes uniquely identifiable controls
 
-The opt-in Remote flow uses F8 to start or stop dictation, while Enter during recording uses ChatGPT's existing Send action. Normal Chat support remains intentionally unavailable until its dictation control can be identified without coordinates or structural guesses. The implementation does not use coordinate maps, gesture injection, a custom keyboard, or a separate speech-recognition stack.
+The current ChatGPT Remote hierarchy does not give its dictation start control a unique accessible description or view ID. The only matcher that activated it relied on an unnamed structural wrapper, so it was removed rather than shipping an unsafe F8 action. Dictation remains on the roadmap until ChatGPT exposes a semantic control; Enter2Send will not substitute coordinates, gestures, a custom keyboard, or a separate speech-recognition stack.
 
 ### Emulator preflight (2026-07-21)
 

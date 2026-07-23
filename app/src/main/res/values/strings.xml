@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Enter2Send</string>
-    <string name="service_description">Handles Enter and optional F8 dictation only when official ChatGPT controls are unambiguously identified. Prompt contents are never read or logged.</string>
+    <string name="service_description">Handles Enter only when the official ChatGPT message composer and its Send control are unambiguously identified. Prompt contents are never read or logged.</string>
     <string name="privacy_summary">Only affects the official ChatGPT message composer. No prompt text is read, stored, or logged.</string>
     <string name="open_accessibility_settings">Open accessibility settings</string>
     <string name="master_switch_label">Enter-to-send enabled</string>
-    <string name="dictation_switch_label">F8 dictation (Remote only, experimental)</string>
     <string name="service_on">Accessibility service: ON</string>
     <string name="service_off">Accessibility service: OFF</string>
-    <string name="key_help">Enter / Numpad Enter: send\nShift+Enter: newline\nRemote only — F8: start or stop dictation\nRemote only — Enter while dictating: stop and send\n\nF8 is off by default. Normal Chat dictation is not supported because its control cannot be identified safely.</string>
+    <string name="key_help">Enter / Numpad Enter: send\nShift+Enter: newline\n\nAfter sending, Enter2Send waits for ChatGPT to clear the Send control before restoring composer focus. F8 dictation remains on the roadmap.</string>
 </resources>
