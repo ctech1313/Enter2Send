@@ -59,7 +59,7 @@ ChatGPT updates may change its accessibility hierarchy. When a future version no
 
 Download the signed APK from the [latest GitHub release](https://github.com/ctech1313/Enter2Send/releases/latest):
 
-1. Download `Enter2Send-v0.2.0.apk` and its `.sha256` checksum file.
+1. Download the `Enter2Send` APK and its matching `.sha256` checksum file.
 2. Confirm the APK's SHA-256 matches the published checksum.
 3. Allow your browser or file manager to install unknown apps when Android prompts you.
 4. Install and open **Enter2Send**.
@@ -71,7 +71,7 @@ Download the signed APK from the [latest GitHub release](https://github.com/ctec
 Verify the download in PowerShell with:
 
 ```powershell
-(Get-FileHash .\Enter2Send-v0.2.0.apk -Algorithm SHA256).Hash
+(Get-FileHash .\Enter2Send-v*.apk -Algorithm SHA256).Hash
 ```
 
 The release notes also publish the signing-certificate SHA-256 fingerprint. Every official update will use the same signing identity.

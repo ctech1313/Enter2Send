@@ -111,6 +111,7 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
             return consume
         }
         if (event.action != KeyEvent.ACTION_DOWN) return false
+        if (!event.hasNoModifiers()) return false
         if (event.repeatCount > 0 && consumedKeyCode == KeyEvent.KEYCODE_F8) return true
 
         val root = chatGptRoot() ?: run {
@@ -388,12 +389,11 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         composer: AccessibilityNodeInfo
     ): AccessibilityNodeInfo? {
         val scope = composer.parent ?: return null
-        val semanticTarget = findUniqueIdentityTarget(
+        return findUniqueIdentityTarget(
             scope,
             DICTATION_START_DESCRIPTIONS,
             DICTATION_START_VIEW_ID_SUFFIXES
         )
-        return semanticTarget ?: findUniqueComposerLocalButtonTarget(scope, composer)
     }
 
     private fun findUniqueDictationStop(
@@ -403,34 +403,6 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
             DICTATION_STOP_DESCRIPTIONS,
             DICTATION_STOP_VIEW_ID_SUFFIXES
         )
-
-    private fun findUniqueComposerLocalButtonTarget(
-        scope: AccessibilityNodeInfo,
-        composer: AccessibilityNodeInfo
-    ): AccessibilityNodeInfo? {
-        val candidates = mutableListOf<AccessibilityNodeInfo>()
-
-        fun visit(node: AccessibilityNodeInfo) {
-            if (candidates.size > 1) return
-            if (node != composer &&
-                isClickableActionNode(node) &&
-                node.className?.toString() == CLASS_VIEW &&
-                node.contentDescription == null &&
-                node.viewIdResourceName == null &&
-                hasDirectButtonChild(node) &&
-                !subtreeHasSendIdentity(node)
-            ) {
-                candidates += node
-            }
-            for (index in 0 until node.childCount) {
-                node.getChild(index)?.let(::visit)
-                if (candidates.size > 1) return
-            }
-        }
-
-        visit(scope)
-        return candidates.singleOrNull()
-    }
 
     private fun findUniqueFocusedEditableNode(
         root: AccessibilityNodeInfo
@@ -575,35 +547,6 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
 
         val viewId = node.viewIdResourceName?.lowercase() ?: return false
         return viewIdSuffixes.any(viewId::endsWith)
-    }
-
-    private fun subtreeHasSendIdentity(root: AccessibilityNodeInfo): Boolean {
-        var found = false
-
-        fun visit(node: AccessibilityNodeInfo) {
-            if (found) return
-            if (isIdentityBearingActionNode(node) &&
-                hasActionIdentity(node, SEND_DESCRIPTIONS, SEND_VIEW_ID_SUFFIXES)
-            ) {
-                found = true
-                return
-            }
-            for (index in 0 until node.childCount) {
-                node.getChild(index)?.let(::visit)
-                if (found) return
-            }
-        }
-
-        visit(root)
-        return found
-    }
-
-    private fun hasDirectButtonChild(node: AccessibilityNodeInfo): Boolean {
-        for (index in 0 until node.childCount) {
-            val child = node.getChild(index) ?: continue
-            if (child.className?.toString() == CLASS_BUTTON) return true
-        }
-        return false
     }
 
     private data class DictationSession(
