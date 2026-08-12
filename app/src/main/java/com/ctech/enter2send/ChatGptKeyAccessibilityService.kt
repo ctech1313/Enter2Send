@@ -406,7 +406,11 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
             if (isClickableActionNode(node, profile)) node else clickableAncestor
         if (clickableTarget != null &&
             isIdentityBearingActionNode(node, profile) &&
-            profile.hasSendIdentity(node.contentDescription, node.viewIdResourceName) &&
+            profile.hasSendIdentity(
+                node.contentDescription,
+                node.viewIdResourceName,
+                node.actionList.map { it.label }
+            ) &&
             matches.none { it == clickableTarget }
         ) {
             matches += clickableTarget
@@ -444,8 +448,9 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
             node.isEditable
         ) return false
 
-        val className = node.className?.toString()
-        return node.isClickable || className == CLASS_BUTTON || className == CLASS_VIEW
+        // Compose and React Native may expose an action's exact semantic label on
+        // a non-clickable icon child while ACTION_CLICK lives on its ancestor.
+        return true
     }
 
     private fun supportsAction(node: AccessibilityNodeInfo, action: Int): Boolean =
@@ -490,9 +495,7 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
     )
 
     companion object {
-        private const val CLASS_BUTTON = "android.widget.Button"
-        private const val CLASS_VIEW = "android.view.View"
-        private const val MAX_COMPOSER_ANCESTOR_LEVELS = 5
+        private const val MAX_COMPOSER_ANCESTOR_LEVELS = 8
         private const val MAX_COMPOSER_ANCHOR_ANCESTORS = 3
         private const val SEND_POLL_INTERVAL_MS = 100L
         private const val SEND_CONFIRM_TIMEOUT_MS = 3_000L
