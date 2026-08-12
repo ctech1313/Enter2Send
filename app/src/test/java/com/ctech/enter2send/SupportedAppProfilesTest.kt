@@ -44,6 +44,26 @@ class SupportedAppProfilesTest {
     }
 
     @Test
+    fun matchesCurrentChatGptSendSemantics() {
+        val profile = SupportedAppProfiles.chatGpt
+
+        assertTrue(profile.hasSendIdentity("Send prompt", null))
+        assertTrue(profile.hasSendIdentity("전송", null))
+        assertTrue(profile.hasSendIdentity("메시지 보내기", null))
+        assertTrue(profile.hasSendIdentity("프롬프트 보내기", null))
+        assertFalse(profile.hasSendIdentity("Resend prompt", null))
+    }
+
+    @Test
+    fun matchesSendSemanticsExposedOnlyAsAnActionLabel() {
+        val profile = SupportedAppProfiles.chatGpt
+
+        assertTrue(profile.hasSendIdentity(null, null, listOf("Send prompt")))
+        assertTrue(profile.hasSendIdentity(null, null, listOf(null, "메시지 보내기")))
+        assertFalse(profile.hasSendIdentity(null, null, listOf("Resend prompt")))
+    }
+
+    @Test
     fun matchesOnlyKnownSendViewIdSuffixes() {
         val profile = SupportedAppProfiles.messenger
 

@@ -17,18 +17,22 @@ data class SupportedAppProfile(
 
     fun hasSendIdentity(
         contentDescription: CharSequence?,
-        viewIdResourceName: String?
+        viewIdResourceName: String?,
+        actionLabels: Iterable<CharSequence?> = emptyList()
     ): Boolean {
-        val description = contentDescription?.toString()?.trim()
-        if (description != null && sendDescriptions.any {
-                it.equals(description, ignoreCase = true)
-            }
+        if (matchesSendDescription(contentDescription) ||
+            actionLabels.any(::matchesSendDescription)
         ) {
             return true
         }
 
         val viewId = viewIdResourceName?.lowercase(Locale.ROOT) ?: return false
         return sendViewIdSuffixes.any(viewId::endsWith)
+    }
+
+    private fun matchesSendDescription(description: CharSequence?): Boolean {
+        val normalized = description?.toString()?.trim() ?: return false
+        return sendDescriptions.any { it.equals(normalized, ignoreCase = true) }
     }
 
     fun hasRequiredWindowIdentity(contentDescription: CharSequence?): Boolean {
@@ -46,7 +50,14 @@ object SupportedAppProfiles {
         packageName = "com.openai.chatgpt",
         preferenceKey = "app_chatgpt_enabled",
         enabledByDefault = true,
-        sendDescriptions = setOf("Send", "Send message"),
+        sendDescriptions = setOf(
+            "Send",
+            "Send message",
+            "Send prompt",
+            "전송",
+            "메시지 보내기",
+            "프롬프트 보내기"
+        ),
         sendViewIdSuffixes = setOf(
             "/send",
             "/send_button",
