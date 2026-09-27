@@ -2,9 +2,11 @@
 <resources>
     <string name="app_name">Enter2Send</string>
     <string name="app_tagline">Desktop-style sending for physical keyboards on Android and Samsung DeX.</string>
-    <string name="service_description">Makes Enter send in explicitly enabled, supported chat composers when their Send control is unambiguous. Message contents are never read or logged.</string>
-    <string name="privacy_summary">Works only in the apps you enable. Message text is never read, stored, or logged.</string>
+    <string name="service_description">Makes Enter send in explicitly enabled, supported chat composers when their Send control is unambiguous. ChatGPT text is checked only for emptiness; contents are never logged or stored.</string>
+    <string name="privacy_summary">Works only in the apps you enable. ChatGPT text is checked only for emptiness; contents are never logged or stored.</string>
     <string name="open_accessibility_settings">Open accessibility settings</string>
+    <string name="background_setup_summary">If Android stops the service after you close apps, allow Enter2Send to run in the background. In system app settings, check battery restrictions and background autostart if available. Keep the app in Recents when your device requires it.</string>
+    <string name="open_app_settings">Open Enter2Send app settings</string>
     <string name="master_switch_label">Enter-to-send enabled</string>
     <string name="master_switch_summary">Pause every Enter2Send integration without revoking accessibility access.</string>
     <string name="supported_apps_label">Supported apps</string>
@@ -16,8 +18,8 @@
     <string name="messenger_summary">Verified in Messenger chats. Opt in when you want Enter to send.</string>
     <string name="claude_remote_summary">Remote Control only. Ordinary Claude chats and Dispatch stay native.</string>
     <string name="keyboard_controls_label">Keyboard controls</string>
-    <string name="key_help">Enter / Numpad Enter  •  Send\nShift+Enter  •  New line\n\nAfter a successful send, Enter2Send waits for the app to clear its Send control before restoring composer focus.</string>
+    <string name="key_help">Enter / Numpad Enter / Ctrl+Enter  •  Send\nShift+Enter  •  New line\n\nAfter a successful send, Enter2Send waits for the app to clear its Send control before restoring composer focus.</string>
     <string name="safety_label">Safe by design</string>
-    <string name="safety_summary">No network permission, telemetry, message-text access, custom keyboard, coordinate taps, or gesture injection. If the composer or Send control is unclear, the key passes through unchanged.</string>
+    <string name="safety_summary">No network permission, telemetry, message-content logging or storage, custom keyboard, coordinate taps, or gesture injection. If the composer or Send control is unclear, the key passes through unchanged.</string>
     <string name="native_setting_note">Tip: if an app already offers its own Enter-to-send setting, use that instead.</string>
 </resources>

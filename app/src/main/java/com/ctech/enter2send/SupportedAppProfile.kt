@@ -46,7 +46,7 @@ object SupportedAppProfiles {
         packageName = "com.openai.chatgpt",
         preferenceKey = "app_chatgpt_enabled",
         enabledByDefault = true,
-        sendDescriptions = setOf("Send", "Send message"),
+        sendDescriptions = setOf("Send", "Send message", "Enviar", "Enviar mensagem", "Senden"),
         sendViewIdSuffixes = setOf(
             "/send",
             "/send_button",

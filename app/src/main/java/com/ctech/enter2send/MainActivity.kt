@@ -8,6 +8,7 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
@@ -69,6 +70,23 @@ class MainActivity : Activity() {
                 backgroundTintList = ColorStateList.valueOf(COLOR_PRIMARY)
                 setOnClickListener {
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            })
+
+            addView(textView(getString(R.string.background_setup_summary), 14f, COLOR_MUTED).apply {
+                setPadding(0, dp(14), 0, dp(6))
+            })
+            addView(Button(this@MainActivity).apply {
+                text = getString(R.string.open_app_settings)
+                isAllCaps = false
+                setOnClickListener {
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.parse("package:$packageName")
+                    })
                 }
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,

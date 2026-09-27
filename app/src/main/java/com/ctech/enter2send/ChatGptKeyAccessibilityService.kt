@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -19,6 +20,9 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val operationPackage = sendOperation?.composerAnchor?.packageName ?: return
         if (event?.packageName?.toString() != operationPackage) {
+            // Keyboard and system overlays emit unrelated events while ChatGPT
+            // remains the input-focused window. Polling verifies that window.
+            if (operationPackage == SupportedAppProfiles.chatGpt.packageName) return
             resetSendOperation()
         }
     }
@@ -62,14 +66,39 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
             return false
         }
 
-        refreshSendOperation(activeApp.root, activeApp.profile)
-        if (sendOperation != null) return false
+        if (activeApp.profile == SupportedAppProfiles.chatGpt) {
+            Log.d(TAG, "ChatGPT detected; Enter down; ctrl=${event.isCtrlPressed}")
+        }
 
-        val composer = findFocusedComposer(activeApp.root, activeApp.profile) ?: return false
+        refreshSendOperation(activeApp.root, activeApp.profile)
+        if (sendOperation != null) {
+            // A dynamic composer can become ready before the old send settles.
+            // A new focused, nonempty composer is a fresh send opportunity.
+            val current = findFocusedComposer(activeApp.root, activeApp.profile)
+            if (activeApp.profile != SupportedAppProfiles.chatGpt ||
+                current?.text.isNullOrBlank()
+            ) return false
+            resetSendOperation()
+        }
+
+        val composer = findFocusedComposer(activeApp.root, activeApp.profile) ?: run {
+            logChatGpt(activeApp.profile, "Focused composer missing")
+            return false
+        }
+        logChatGpt(activeApp.profile, "Focused composer found")
+        if (activeApp.profile == SupportedAppProfiles.chatGpt && composer.text.isNullOrBlank()) {
+            logChatGpt(activeApp.profile, "Composer empty")
+            return false
+        }
         val sendButton =
-            findUniqueSendButtonNearComposer(composer, activeApp.profile) ?: return false
+            findUniqueSendButtonNearComposer(composer, activeApp.profile) ?: run {
+                logChatGpt(activeApp.profile, "Enabled unique Send action missing")
+                return false
+            }
+        logChatGpt(activeApp.profile, "Send action found")
         val composerAnchor = createComposerAnchor(composer, activeApp.profile)
         val clicked = sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        logChatGpt(activeApp.profile, "Send click result=$clicked")
         if (clicked) {
             consumedKeyCode = event.keyCode
             beginSendConfirmation(composerAnchor)
@@ -153,7 +182,7 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
 
         val focusedComposer = findFocusedComposer(root, profile)
         if (focusedComposer != null &&
-            !matchesComposerAnchor(focusedComposer, operation.composerAnchor)
+            !matchesComposerForProfile(focusedComposer, operation.composerAnchor, profile)
         ) {
             resetSendOperation()
             return
@@ -300,7 +329,7 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         composerAnchor: ComposerAnchor
     ): AccessibilityNodeInfo? {
         val composer = findUniqueEditableNode(root, profile, requireFocus = false) ?: return null
-        return composer.takeIf { matchesComposerAnchor(it, composerAnchor) }
+        return composer.takeIf { matchesComposerForProfile(it, composerAnchor, profile) }
     }
 
     private fun findUniqueEditableNode(
@@ -353,6 +382,17 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         composer.className?.toString() == anchor.className &&
         composer.viewIdResourceName == anchor.viewIdResourceName &&
         composerAncestorClassNames(composer) == anchor.ancestorClassNames
+
+    private fun matchesComposerForProfile(
+        composer: AccessibilityNodeInfo,
+        anchor: ComposerAnchor,
+        profile: SupportedAppProfile
+    ): Boolean = matchesComposerAnchor(composer, anchor) ||
+        (profile == SupportedAppProfiles.chatGpt &&
+            composer.packageName?.toString() == anchor.packageName &&
+            composer.windowId == anchor.windowId &&
+            composer.className?.toString() == anchor.className &&
+            composer.viewIdResourceName == anchor.viewIdResourceName)
 
     private fun composerAncestorClassNames(composer: AccessibilityNodeInfo): List<String?> {
         val classNames = mutableListOf<String?>()
@@ -451,6 +491,10 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
     private fun supportsAction(node: AccessibilityNodeInfo, action: Int): Boolean =
         node.actionList.any { it.id == action }
 
+    private fun logChatGpt(profile: SupportedAppProfile, reason: String) {
+        if (profile == SupportedAppProfiles.chatGpt) Log.d(TAG, reason)
+    }
+
     private sealed class SendOperation {
         abstract val composerAnchor: ComposerAnchor
         abstract val deadline: Long
@@ -490,6 +534,7 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
     )
 
     companion object {
+        private const val TAG = "Enter2Send"
         private const val CLASS_BUTTON = "android.widget.Button"
         private const val CLASS_VIEW = "android.view.View"
         private const val MAX_COMPOSER_ANCESTOR_LEVELS = 5

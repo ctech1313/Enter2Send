@@ -92,7 +92,7 @@ Enter2Send intentionally keeps a small trust boundary:
 - No network permission
 - No analytics, telemetry, advertising, or crash reporting
 - No backend, account, API integration, or database
-- No access to `AccessibilityNodeInfo.text`
+- For ChatGPT only, checks whether the focused composer has nonblank text; never logs, stores, or compares its contents
 - No message-content logging, storage, comparison, or transmission
 - No fixed-coordinate taps or gesture injection
 - No custom keyboard or input method
@@ -114,6 +114,7 @@ Support is added per app and remains opt-in unless there is strong evidence for 
 - Confirm the individual app switch is enabled.
 - Confirm the actual message composer is focused and a Send button is visible.
 - If the supported app was updated, its accessibility hierarchy may have changed.
+- If the service stops after closing apps, open Enter2Send's app settings from its main screen and allow background activity or autostart where your Android device provides those controls. Re-enable the accessibility service if Android has stopped it.
 
 ### Enter behaves unexpectedly elsewhere
 
