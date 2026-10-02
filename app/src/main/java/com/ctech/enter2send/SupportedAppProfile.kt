@@ -17,18 +17,37 @@ data class SupportedAppProfile(
 
     fun hasSendIdentity(
         contentDescription: CharSequence?,
-        viewIdResourceName: String?
+        viewIdResourceName: String?,
+        clickActionLabels: Iterable<CharSequence?> = emptyList()
     ): Boolean {
-        val description = contentDescription?.toString()?.trim()
-        if (description != null && sendDescriptions.any {
-                it.equals(description, ignoreCase = true)
-            }
+        if (hasConflictingSendSemantics(contentDescription, clickActionLabels)) {
+            return false
+        }
+
+        if (matchesSendDescription(contentDescription) ||
+            clickActionLabels.any(::matchesSendDescription)
         ) {
             return true
         }
 
         val viewId = viewIdResourceName?.lowercase(Locale.ROOT) ?: return false
         return sendViewIdSuffixes.any(viewId::endsWith)
+    }
+
+    internal fun hasConflictingSendSemantics(
+        contentDescription: CharSequence?,
+        clickActionLabels: Iterable<CharSequence?>
+    ): Boolean = isConflictingSendDescription(contentDescription) ||
+        clickActionLabels.any(::isConflictingSendDescription)
+
+    private fun isConflictingSendDescription(description: CharSequence?): Boolean {
+        val normalized = description?.toString()?.trim() ?: return false
+        return normalized.isNotEmpty() && !matchesSendDescription(normalized)
+    }
+
+    private fun matchesSendDescription(description: CharSequence?): Boolean {
+        val normalized = description?.toString()?.trim() ?: return false
+        return sendDescriptions.any { it.equals(normalized, ignoreCase = true) }
     }
 
     fun hasRequiredWindowIdentity(contentDescription: CharSequence?): Boolean {
@@ -46,7 +65,17 @@ object SupportedAppProfiles {
         packageName = "com.openai.chatgpt",
         preferenceKey = "app_chatgpt_enabled",
         enabledByDefault = true,
-        sendDescriptions = setOf("Send", "Send message", "Enviar", "Enviar mensagem", "Senden"),
+        sendDescriptions = setOf(
+            "Send",
+            "Send message",
+            "Send prompt",
+            "Enviar",
+            "Enviar mensagem",
+            "Senden",
+            "전송",
+            "메시지 보내기",
+            "프롬프트 보내기"
+        ),
         sendViewIdSuffixes = setOf(
             "/send",
             "/send_button",

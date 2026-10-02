@@ -56,6 +56,80 @@ class SupportedAppProfilesTest {
     }
 
     @Test
+    fun matchesCurrentChatGptSendSemantics() {
+        val profile = SupportedAppProfiles.chatGpt
+
+        assertTrue(profile.hasSendIdentity("Send prompt", null))
+        assertTrue(profile.hasSendIdentity("전송", null))
+        assertTrue(profile.hasSendIdentity("메시지 보내기", null))
+        assertTrue(profile.hasSendIdentity("프롬프트 보내기", null))
+        assertFalse(profile.hasSendIdentity("Resend prompt", null))
+    }
+
+    @Test
+    fun matchesSendSemanticsExposedOnlyAsAClickActionLabel() {
+        val profile = SupportedAppProfiles.chatGpt
+
+        assertTrue(
+            profile.hasSendIdentity(
+                contentDescription = null,
+                viewIdResourceName = null,
+                clickActionLabels = listOf("Send prompt")
+            )
+        )
+        assertTrue(
+            profile.hasSendIdentity(
+                contentDescription = null,
+                viewIdResourceName = null,
+                clickActionLabels = listOf(null, "메시지 보내기")
+            )
+        )
+        assertFalse(
+            profile.hasSendIdentity(
+                contentDescription = null,
+                viewIdResourceName = null,
+                clickActionLabels = listOf("Resend prompt")
+            )
+        )
+    }
+
+    @Test
+    fun rejectsConflictingExplicitSendSemanticsForEveryProfile() {
+        for (profile in SupportedAppProfiles.all) {
+            assertFalse(
+                profile.hasSendIdentity(
+                    contentDescription = "Stop",
+                    viewIdResourceName = null,
+                    clickActionLabels = listOf("Send")
+                )
+            )
+            assertFalse(
+                profile.hasSendIdentity(
+                    contentDescription = "Send",
+                    viewIdResourceName = null,
+                    clickActionLabels = listOf("Stop")
+                )
+            )
+        }
+    }
+
+    @Test
+    fun rejectsNonSendDescriptionEvenWithKnownSendViewId() {
+        assertFalse(
+            SupportedAppProfiles.chatGpt.hasSendIdentity(
+                contentDescription = "Stop",
+                viewIdResourceName = "com.openai.chatgpt:id/send_button"
+            )
+        )
+        assertFalse(
+            SupportedAppProfiles.chatGpt.hasSendIdentity(
+                contentDescription = "Unknown action",
+                viewIdResourceName = "com.openai.chatgpt:id/send_button"
+            )
+        )
+    }
+
+    @Test
     fun matchesOnlyKnownSendViewIdSuffixes() {
         val profile = SupportedAppProfiles.messenger
 
