@@ -18,16 +18,31 @@ data class SupportedAppProfile(
     fun hasSendIdentity(
         contentDescription: CharSequence?,
         viewIdResourceName: String?,
-        actionLabels: Iterable<CharSequence?> = emptyList()
+        clickActionLabels: Iterable<CharSequence?> = emptyList()
     ): Boolean {
+        if (hasConflictingSendSemantics(contentDescription, clickActionLabels)) {
+            return false
+        }
+
         if (matchesSendDescription(contentDescription) ||
-            actionLabels.any(::matchesSendDescription)
+            clickActionLabels.any(::matchesSendDescription)
         ) {
             return true
         }
 
         val viewId = viewIdResourceName?.lowercase(Locale.ROOT) ?: return false
         return sendViewIdSuffixes.any(viewId::endsWith)
+    }
+
+    internal fun hasConflictingSendSemantics(
+        contentDescription: CharSequence?,
+        clickActionLabels: Iterable<CharSequence?>
+    ): Boolean = isConflictingSendDescription(contentDescription) ||
+        clickActionLabels.any(::isConflictingSendDescription)
+
+    private fun isConflictingSendDescription(description: CharSequence?): Boolean {
+        val normalized = description?.toString()?.trim() ?: return false
+        return normalized.isNotEmpty() && !matchesSendDescription(normalized)
     }
 
     private fun matchesSendDescription(description: CharSequence?): Boolean {
