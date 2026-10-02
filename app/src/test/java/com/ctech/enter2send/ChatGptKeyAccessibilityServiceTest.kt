@@ -76,7 +76,10 @@ class ChatGptKeyAccessibilityServiceTest {
         Fixture().apply {
             button.contentDescription = null
             button.actionList.single().let { check(it.id == AccessibilityNodeInfo.ACTION_CLICK) }
-            button.addChild(node().apply { contentDescription = "Send" })
+            button.addChild(node().apply {
+                className = "android.widget.ImageView"
+                contentDescription = "Send"
+            })
 
             assertTrue(down())
             assertEquals(listOf(AccessibilityNodeInfo.ACTION_CLICK), button.performedActionsForTest)
@@ -96,7 +99,10 @@ class ChatGptKeyAccessibilityServiceTest {
             Fixture().apply {
                 button.contentDescription = null
                 val barrier = node().also(invalidate)
-                barrier.addChild(node().apply { contentDescription = "Send" })
+                barrier.addChild(node().apply {
+                    className = "android.widget.ImageView"
+                    contentDescription = "Send"
+                })
                 button.addChild(barrier)
 
                 assertFalse("invalid semantic barrier $index", down())
