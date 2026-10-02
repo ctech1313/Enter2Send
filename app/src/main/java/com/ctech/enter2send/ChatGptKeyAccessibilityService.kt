@@ -10,6 +10,7 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import java.lang.ref.WeakReference
 
 class ChatGptKeyAccessibilityService : AccessibilityService() {
     private var consumedKeyCode: Int? = null
@@ -20,9 +21,15 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val operationPackage = sendOperation?.composerAnchor?.packageName ?: return
         if (event?.packageName?.toString() != operationPackage) {
-            // Keyboard and system overlays emit unrelated events while ChatGPT
-            // remains the input-focused window. Polling verifies that window.
-            if (operationPackage == SupportedAppProfiles.chatGpt.packageName) return
+            // Preserve confirmation through keyboard/system events only while
+            // the original app window still owns input focus.
+            if (operationPackage == SupportedAppProfiles.chatGpt.packageName) {
+                val activeApp = activeAppRoot()
+                val anchor = sendOperation?.composerAnchor ?: return
+                if (activeApp?.profile?.packageName == anchor.packageName &&
+                    activeApp.root.windowId == anchor.windowId
+                ) return
+            }
             resetSendOperation()
         }
     }
@@ -71,25 +78,16 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         }
 
         refreshSendOperation(activeApp.root, activeApp.profile)
-        if (sendOperation != null) {
-            // A dynamic composer can become ready before the old send settles.
-            // A new focused, nonempty composer is a fresh send opportunity.
-            val current = findFocusedComposer(activeApp.root, activeApp.profile)
-            if (activeApp.profile != SupportedAppProfiles.chatGpt ||
-                current?.text.isNullOrBlank()
-            ) return false
-            resetSendOperation()
-        }
+        // An enabled Send control may still represent the previous draft while
+        // the app handles its first click. Never use text or recreation alone
+        // as evidence that another send is safe.
+        if (sendOperation != null) return false
 
         val composer = findFocusedComposer(activeApp.root, activeApp.profile) ?: run {
             logChatGpt(activeApp.profile, "Focused composer missing")
             return false
         }
         logChatGpt(activeApp.profile, "Focused composer found")
-        if (activeApp.profile == SupportedAppProfiles.chatGpt && composer.text.isNullOrBlank()) {
-            logChatGpt(activeApp.profile, "Composer empty")
-            return false
-        }
         val sendButton =
             findUniqueSendButtonNearComposer(composer, activeApp.profile) ?: run {
                 logChatGpt(activeApp.profile, "Enabled unique Send action missing")
@@ -182,6 +180,7 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
 
         val focusedComposer = findFocusedComposer(root, profile)
         if (focusedComposer != null &&
+            profile != SupportedAppProfiles.chatGpt &&
             !matchesComposerForProfile(focusedComposer, operation.composerAnchor, profile)
         ) {
             resetSendOperation()
@@ -196,7 +195,13 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
                     return
                 }
 
-                val composer = findAnchoredComposer(root, profile, operation.composerAnchor)
+                // A replacement ChatGPT composer can confirm that Send cleared,
+                // but it must not inherit focus actions from the old field.
+                val composer = if (profile == SupportedAppProfiles.chatGpt) {
+                    findUniqueEditableNode(root, profile, requireFocus = false)
+                } else {
+                    findAnchoredComposer(root, profile, operation.composerAnchor)
+                }
                 if (composer == null) {
                     operation.clearPolls = 0
                     return
@@ -206,7 +211,11 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
                     SendButtonMatch.Absent -> {
                         operation.clearPolls += 1
                         if (operation.clearPolls >= SEND_CLEAR_CONFIRM_POLLS) {
-                            beginRefocusing(operation.composerAnchor, composer, now)
+                            if (matchesComposerForProfile(composer, operation.composerAnchor, profile)) {
+                                beginRefocusing(operation.composerAnchor, composer, now)
+                            } else {
+                                resetSendOperation()
+                            }
                         }
                     }
 
@@ -372,7 +381,8 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
             windowId = composer.windowId,
             className = composer.className?.toString(),
             viewIdResourceName = composer.viewIdResourceName,
-            ancestorClassNames = composerAncestorClassNames(composer)
+            ancestorClassNames = composerAncestorClassNames(composer),
+            node = WeakReference(composer)
         )
 
     private fun matchesComposerAnchor(
@@ -387,12 +397,17 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         composer: AccessibilityNodeInfo,
         anchor: ComposerAnchor,
         profile: SupportedAppProfile
-    ): Boolean = matchesComposerAnchor(composer, anchor) ||
-        (profile == SupportedAppProfiles.chatGpt &&
+    ): Boolean = if (profile == SupportedAppProfiles.chatGpt) {
+        // AccessibilityNodeInfo equality identifies the same window/source node;
+        // matching class/view IDs (often null) cannot identify a replacement.
+        composer == anchor.node.get() &&
             composer.packageName?.toString() == anchor.packageName &&
             composer.windowId == anchor.windowId &&
             composer.className?.toString() == anchor.className &&
-            composer.viewIdResourceName == anchor.viewIdResourceName)
+            composer.viewIdResourceName == anchor.viewIdResourceName
+    } else {
+        matchesComposerAnchor(composer, anchor)
+    }
 
     private fun composerAncestorClassNames(composer: AccessibilityNodeInfo): List<String?> {
         val classNames = mutableListOf<String?>()
@@ -525,7 +540,10 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         val windowId: Int,
         val className: String?,
         val viewIdResourceName: String?,
-        val ancestorClassNames: List<String?>
+        val ancestorClassNames: List<String?>,
+        // Do not retain a full accessibility snapshot for the operation lifetime.
+        // If Android/the GC releases it, skip speculative focus restoration.
+        val node: WeakReference<AccessibilityNodeInfo>
     )
 
     private data class ActiveAppRoot(
