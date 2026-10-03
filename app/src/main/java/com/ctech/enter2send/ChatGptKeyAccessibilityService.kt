@@ -73,9 +73,7 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
             return false
         }
 
-        if (activeApp.profile == SupportedAppProfiles.chatGpt) {
-            Log.d(TAG, "ChatGPT detected; Enter down; ctrl=${event.isCtrlPressed}")
-        }
+        logChatGpt(activeApp.profile, "ChatGPT detected; Enter down; ctrl=${event.isCtrlPressed}")
 
         refreshSendOperation(activeApp.root, activeApp.profile)
         // An enabled Send control may still represent the previous draft while
@@ -540,7 +538,7 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         node.actionList.any { it.id == action }
 
     private fun logChatGpt(profile: SupportedAppProfile, reason: String) {
-        if (profile == SupportedAppProfiles.chatGpt) Log.d(TAG, reason)
+        if (BuildConfig.DEBUG && profile == SupportedAppProfiles.chatGpt) Log.d(TAG, reason)
     }
 
     private sealed class SendOperation {
