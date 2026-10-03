@@ -170,6 +170,100 @@ class ChatGptKeyAccessibilityServiceTest {
     }
 
     @Test
+    fun conflictingSiblingSemanticsRejectSharedTargetInEitherOrder() {
+        for (packageName in supportedPackages) {
+            for (conflict in listOf("Stop", "Voice", "Resend")) {
+                for (sendFirst in listOf(true, false)) {
+                    Fixture(packageName).apply {
+                        button.contentDescription = null
+                        val sendNode = node(packageName).apply {
+                            className = "android.widget.ImageView"
+                            contentDescription = "Send"
+                        }
+                        val conflictNode = node(packageName).apply {
+                            className = "android.widget.ImageView"
+                            contentDescription = conflict
+                        }
+                        if (sendFirst) {
+                            button.addChild(sendNode).addChild(conflictNode)
+                        } else {
+                            button.addChild(conflictNode).addChild(sendNode)
+                        }
+
+                        assertFalse(
+                            "$packageName $conflict sendFirst=$sendFirst",
+                            down()
+                        )
+                        assertTrue(button.performedActionsForTest.isEmpty())
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun conflictingChildRejectsParentSendViewId() {
+        Fixture().apply {
+            button.contentDescription = null
+            button.viewIdResourceName = "com.openai.chatgpt:id/send_button"
+            button.addChild(node().apply {
+                className = "android.widget.ImageView"
+                contentDescription = "Stop"
+            })
+
+            assertFalse(down())
+            assertTrue(button.performedActionsForTest.isEmpty())
+        }
+    }
+
+    @Test
+    fun independentlyClickableConflictDoesNotRejectOuterSendTarget() {
+        Fixture().apply {
+            val nestedStop = clickableNode("Stop")
+            button.addChild(nestedStop)
+
+            assertTrue(down())
+            assertEquals(listOf(AccessibilityNodeInfo.ACTION_CLICK), button.performedActionsForTest)
+            assertTrue(nestedStop.performedActionsForTest.isEmpty())
+        }
+    }
+
+    @Test
+    fun laterConflictCanReduceTwoProvisionalTargetsToOne() {
+        Fixture().apply {
+            button.contentDescription = null
+            button.addChild(node().apply { contentDescription = "Send" })
+            val survivingTarget = clickableNode("Send")
+            button.addChild(survivingTarget)
+            button.addChild(node().apply { contentDescription = "Stop" })
+
+            assertTrue(down())
+            assertTrue(button.performedActionsForTest.isEmpty())
+            assertEquals(
+                listOf(AccessibilityNodeInfo.ACTION_CLICK),
+                survivingTarget.performedActionsForTest
+            )
+        }
+    }
+
+    @Test
+    fun laterConflictsCanReduceTwoProvisionalTargetsToNone() {
+        Fixture().apply {
+            button.contentDescription = null
+            button.addChild(node().apply { contentDescription = "Send" })
+            val nestedTarget = clickableNode("Send").apply {
+                addChild(node().apply { contentDescription = "Stop" })
+            }
+            button.addChild(nestedTarget)
+            button.addChild(node().apply { contentDescription = "Stop" })
+
+            assertFalse(down())
+            assertTrue(button.performedActionsForTest.isEmpty())
+            assertTrue(nestedTarget.performedActionsForTest.isEmpty())
+        }
+    }
+
+    @Test
     fun twoPhysicalSendTargetsAreAmbiguous() {
         Fixture().apply {
             root.addChild(clickableNode("Send"))
