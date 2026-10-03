@@ -440,15 +440,17 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         repeat(maxAncestorLevels) {
             ancestor = ancestor?.parent
             val scope = ancestor ?: return SendButtonMatch.Absent
-            val candidates = mutableListOf<AccessibilityNodeInfo>()
+            val acceptedTargets = mutableListOf<AccessibilityNodeInfo>()
+            val rejectedTargets = mutableListOf<AccessibilityNodeInfo>()
             collectIdentityTargets(
                 scope,
                 null,
                 profile,
-                candidates
+                acceptedTargets,
+                rejectedTargets
             )
-            when (candidates.size) {
-                1 -> return SendButtonMatch.Unique(candidates.single())
+            when (acceptedTargets.size) {
+                1 -> return SendButtonMatch.Unique(acceptedTargets.single())
                 in 2..Int.MAX_VALUE -> return SendButtonMatch.Ambiguous
             }
         }
@@ -459,10 +461,9 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         node: AccessibilityNodeInfo,
         clickableAncestor: AccessibilityNodeInfo?,
         profile: SupportedAppProfile,
-        matches: MutableList<AccessibilityNodeInfo>
+        acceptedTargets: MutableList<AccessibilityNodeInfo>,
+        rejectedTargets: MutableList<AccessibilityNodeInfo>
     ) {
-        if (matches.size > 1) return
-
         val eligibleSemanticNode = isIdentityBearingActionNode(node, profile)
         val supportsClickAction = supportsAction(node, AccessibilityNodeInfo.ACTION_CLICK)
         val declaresActionControl = node.isClickable || supportsClickAction
@@ -487,29 +488,36 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
                 node.contentDescription,
                 clickActionLabels
             )
-        val clickableTarget = when {
+        val identityTarget = when {
             !eligibleSemanticNode -> null
             declaresActionControl && !clickableActionNode -> null
-            hasConflictingSendSemantics -> null
             clickableActionNode -> node
             else -> clickableAncestor
         }
-        if (clickableTarget != null &&
-            hasSendIdentity &&
-            matches.none { it == clickableTarget }
-        ) {
-            matches += clickableTarget
+        if (identityTarget != null) {
+            if (hasConflictingSendSemantics) {
+                acceptedTargets.removeAll { it == identityTarget }
+                if (rejectedTargets.none { it == identityTarget }) {
+                    rejectedTargets += identityTarget
+                }
+            } else if (hasSendIdentity &&
+                rejectedTargets.none { it == identityTarget } &&
+                acceptedTargets.none { it == identityTarget }
+            ) {
+                acceptedTargets += identityTarget
+            }
         }
 
+        val descendantTarget = identityTarget.takeUnless { hasConflictingSendSemantics }
         for (index in 0 until node.childCount) {
             val child = node.getChild(index) ?: continue
             collectIdentityTargets(
                 child,
-                clickableTarget,
+                descendantTarget,
                 profile,
-                matches
+                acceptedTargets,
+                rejectedTargets
             )
-            if (matches.size > 1) return
         }
     }
 
