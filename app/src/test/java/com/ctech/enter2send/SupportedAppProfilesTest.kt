@@ -44,6 +44,18 @@ class SupportedAppProfilesTest {
     }
 
     @Test
+    fun chatGptMatchesLocalizedSendButNotOtherComposerActions() {
+        val profile = SupportedAppProfiles.chatGpt
+        assertTrue(profile.hasSendIdentity("Enviar", null))
+        assertTrue(profile.hasSendIdentity("Enviar mensagem", null))
+        assertTrue(profile.hasSendIdentity("Senden", null))
+        assertFalse(profile.hasSendIdentity("Stop generating", null))
+        assertFalse(profile.hasSendIdentity("Voice", null))
+        assertFalse(profile.hasSendIdentity("Attach", null))
+        assertFalse(profile.hasSendIdentity("Regenerate", null))
+    }
+
+    @Test
     fun matchesCurrentChatGptSendSemantics() {
         val profile = SupportedAppProfiles.chatGpt
 

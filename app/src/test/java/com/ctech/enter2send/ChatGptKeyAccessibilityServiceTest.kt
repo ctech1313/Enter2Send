@@ -2,6 +2,7 @@ package com.ctech.enter2send
 
 import android.os.Build
 import android.os.Handler
+import android.util.Log
 import android.util.SparseArray
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -17,6 +18,24 @@ import org.junit.Test
  * remains responsible for validating device-specific node trees.
  */
 class ChatGptKeyAccessibilityServiceTest {
+    @Test
+    fun diagnosticsAreDebugOnlyAndNeverIncludeComposerText() {
+        Fixture().apply {
+            val privateDraft = "private draft for diagnostics regression"
+            composer.text = privateDraft
+            Log.messagesForTest.clear()
+
+            assertTrue(down())
+            if (BuildConfig.DEBUG) {
+                assertTrue(Log.messagesForTest.any { "Enter down" in it })
+                assertTrue(Log.messagesForTest.any { "Send click result=true" in it })
+            } else {
+                assertTrue("Release must not log keyboard or send activity", Log.messagesForTest.isEmpty())
+            }
+            assertFalse(Log.messagesForTest.any { privateDraft in it })
+        }
+    }
+
     @Test
     fun clickActionLabelIsTheOnlyAcceptedActionLabel() {
         for (packageName in supportedPackages) {

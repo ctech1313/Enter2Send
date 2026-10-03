@@ -69,6 +69,9 @@ object SupportedAppProfiles {
             "Send",
             "Send message",
             "Send prompt",
+            "Enviar",
+            "Enviar mensagem",
+            "Senden",
             "전송",
             "메시지 보내기",
             "프롬프트 보내기"

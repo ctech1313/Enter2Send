@@ -36,8 +36,8 @@ If an app already provides a reliable native **Enter-to-send** setting, use that
 | **Enter** in an enabled supported composer | Sends exactly once |
 | **Numpad Enter** | Uses the same explicit send path |
 | **Shift+Enter** | Passes through for a new line |
-| After a successful send | Waits for the Send control to clear, then restores composer focus |
-| Empty, missing, or ambiguous composer | Leaves Enter to the active app |
+| After a successful send | Waits for the Send control to clear; restores focus only when the original composer can still be identified |
+| Missing/ambiguous composer, or unavailable/disabled Send control | Leaves Enter to the active app |
 | Search, settings, login fields, disabled apps, or another app | Unaffected |
 | Enter2Send master switch disabled | All keyboard input passes through |
 
@@ -49,6 +49,8 @@ The service acts only when Android exposes all required signals:
 4. Any app-specific surface marker—such as Claude Remote Control's `Change mode` marker—is present.
 
 If any requirement is missing or ambiguous, Enter2Send fails open and does nothing.
+
+The service does not inspect composer text. It relies on the app to disable or remove Send when sending is unavailable, including for empty drafts. After sending, ChatGPT focus restoration requires the original accessibility source to remain identifiable; a recreated or uncertain field may need to be focused manually.
 
 ## Install
 
@@ -114,6 +116,7 @@ Support is added per app and remains opt-in unless there is strong evidence for 
 - Confirm the individual app switch is enabled.
 - Confirm the actual message composer is focused and a Send button is visible.
 - If the supported app was updated, its accessibility hierarchy may have changed.
+- If the service stops after closing apps, open Enter2Send's app settings from its main screen and allow background activity or autostart where your Android device provides those controls. Re-enable the accessibility service if Android has stopped it.
 
 ### Enter behaves unexpectedly elsewhere
 
