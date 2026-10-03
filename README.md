@@ -137,6 +137,8 @@ cd Enter2Send
 
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
+Local unit tests exercise the compiled accessibility service using deterministic Android API fakes in `app/src/test`. The fakes reject message-text reads and cover action selection, nested controls, and hardware-key event handling; they are not packaged into the APK. These tests do not replace native-app and physical-keyboard validation on target devices.
+
 Release builds require signing properties outside the repository. Copy `keystore.properties.example` to the configured external path and never commit private signing material.
 
 ## Roadmap

@@ -376,18 +376,26 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         profile: SupportedAppProfile
     ): SendButtonMatch {
         var ancestor: AccessibilityNodeInfo? = composer
-        repeat(MAX_COMPOSER_ANCESTOR_LEVELS) {
+        val maxAncestorLevels =
+            if (profile === SupportedAppProfiles.chatGpt) {
+                CHATGPT_MAX_COMPOSER_ANCESTOR_LEVELS
+            } else {
+                DEFAULT_MAX_COMPOSER_ANCESTOR_LEVELS
+            }
+        repeat(maxAncestorLevels) {
             ancestor = ancestor?.parent
             val scope = ancestor ?: return SendButtonMatch.Absent
-            val candidates = mutableListOf<AccessibilityNodeInfo>()
+            val acceptedTargets = mutableListOf<AccessibilityNodeInfo>()
+            val rejectedTargets = mutableListOf<AccessibilityNodeInfo>()
             collectIdentityTargets(
                 scope,
                 null,
                 profile,
-                candidates
+                acceptedTargets,
+                rejectedTargets
             )
-            when (candidates.size) {
-                1 -> return SendButtonMatch.Unique(candidates.single())
+            when (acceptedTargets.size) {
+                1 -> return SendButtonMatch.Unique(acceptedTargets.single())
                 in 2..Int.MAX_VALUE -> return SendButtonMatch.Ambiguous
             }
         }
@@ -398,41 +406,65 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
         node: AccessibilityNodeInfo,
         clickableAncestor: AccessibilityNodeInfo?,
         profile: SupportedAppProfile,
-        matches: MutableList<AccessibilityNodeInfo>
+        acceptedTargets: MutableList<AccessibilityNodeInfo>,
+        rejectedTargets: MutableList<AccessibilityNodeInfo>
     ) {
-        if (matches.size > 1) return
-
-        val clickableTarget =
-            if (isClickableActionNode(node, profile)) node else clickableAncestor
-        if (clickableTarget != null &&
-            isIdentityBearingActionNode(node, profile) &&
-            profile.hasSendIdentity(node.contentDescription, node.viewIdResourceName) &&
-            matches.none { it == clickableTarget }
-        ) {
-            matches += clickableTarget
+        val eligibleSemanticNode = isIdentityBearingActionNode(node, profile)
+        val supportsClickAction = supportsAction(node, AccessibilityNodeInfo.ACTION_CLICK)
+        val declaresActionControl = node.isClickable || supportsClickAction
+        val clickableActionNode = eligibleSemanticNode && node.isClickable &&
+            supportsClickAction
+        val clickActionLabels = if (clickableActionNode) {
+            node.actionList
+                .asSequence()
+                .filter { it.id == AccessibilityNodeInfo.ACTION_CLICK }
+                .map { it.label }
+                .toList()
+        } else {
+            emptyList()
+        }
+        val hasSendIdentity = eligibleSemanticNode && profile.hasSendIdentity(
+            node.contentDescription,
+            node.viewIdResourceName,
+            clickActionLabels
+        )
+        val hasConflictingSendSemantics = eligibleSemanticNode &&
+            profile.hasConflictingSendSemantics(
+                node.contentDescription,
+                clickActionLabels
+            )
+        val identityTarget = when {
+            !eligibleSemanticNode -> null
+            declaresActionControl && !clickableActionNode -> null
+            clickableActionNode -> node
+            else -> clickableAncestor
+        }
+        if (identityTarget != null) {
+            if (hasConflictingSendSemantics) {
+                acceptedTargets.removeAll { it == identityTarget }
+                if (rejectedTargets.none { it == identityTarget }) {
+                    rejectedTargets += identityTarget
+                }
+            } else if (hasSendIdentity &&
+                rejectedTargets.none { it == identityTarget } &&
+                acceptedTargets.none { it == identityTarget }
+            ) {
+                acceptedTargets += identityTarget
+            }
         }
 
+        val descendantTarget = identityTarget.takeUnless { hasConflictingSendSemantics }
         for (index in 0 until node.childCount) {
             val child = node.getChild(index) ?: continue
             collectIdentityTargets(
                 child,
-                clickableTarget,
+                descendantTarget,
                 profile,
-                matches
+                acceptedTargets,
+                rejectedTargets
             )
-            if (matches.size > 1) return
         }
     }
-
-    private fun isClickableActionNode(
-        node: AccessibilityNodeInfo,
-        profile: SupportedAppProfile
-    ): Boolean =
-        node.packageName?.toString() == profile.packageName &&
-            node.isVisibleToUser &&
-            node.isEnabled &&
-            node.isClickable &&
-            supportsAction(node, AccessibilityNodeInfo.ACTION_CLICK)
 
     private fun isIdentityBearingActionNode(
         node: AccessibilityNodeInfo,
@@ -444,8 +476,9 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
             node.isEditable
         ) return false
 
-        val className = node.className?.toString()
-        return node.isClickable || className == CLASS_BUTTON || className == CLASS_VIEW
+        // Compose and React Native may expose an action's exact semantic label on
+        // a non-clickable icon child while ACTION_CLICK lives on its ancestor.
+        return true
     }
 
     private fun supportsAction(node: AccessibilityNodeInfo, action: Int): Boolean =
@@ -490,9 +523,8 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
     )
 
     companion object {
-        private const val CLASS_BUTTON = "android.widget.Button"
-        private const val CLASS_VIEW = "android.view.View"
-        private const val MAX_COMPOSER_ANCESTOR_LEVELS = 5
+        private const val DEFAULT_MAX_COMPOSER_ANCESTOR_LEVELS = 5
+        private const val CHATGPT_MAX_COMPOSER_ANCESTOR_LEVELS = 8
         private const val MAX_COMPOSER_ANCHOR_ANCESTORS = 3
         private const val SEND_POLL_INTERVAL_MS = 100L
         private const val SEND_CONFIRM_TIMEOUT_MS = 3_000L
