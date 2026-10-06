@@ -19,17 +19,18 @@ class ChatGptKeyAccessibilityService : AccessibilityService() {
     private var sendPoll: Runnable? = null
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        val operationPackage = sendOperation?.composerAnchor?.packageName ?: return
-        if (event?.packageName?.toString() != operationPackage) {
-            // Preserve confirmation through keyboard/system events only while
-            // the original app window still owns input focus.
-            if (operationPackage == SupportedAppProfiles.chatGpt.packageName) {
-                val activeApp = activeAppRoot()
-                val anchor = sendOperation?.composerAnchor ?: return
-                if (activeApp?.profile?.packageName == anchor.packageName &&
-                    activeApp.root.windowId == anchor.windowId
-                ) return
-            }
+        val anchor = sendOperation?.composerAnchor ?: return
+        if (!BridgePreferences.isMasterEnabled(this)) {
+            resetSendOperation()
+            return
+        }
+
+        // Event provenance does not identify the input owner: background apps
+        // can emit events, and two windows can belong to the same package.
+        val activeApp = activeAppRoot()
+        if (activeApp?.profile?.packageName != anchor.packageName ||
+            activeApp.root.windowId != anchor.windowId
+        ) {
             resetSendOperation()
         }
     }
